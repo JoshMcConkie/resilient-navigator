@@ -56,6 +56,12 @@ Headless / CI (no Matplotlib window):
 PYTHONPATH=. python main.py --max-steps 160 --no-viz
 ```
 
+Export a full mission history as JSON (no Matplotlib), then open `viz/mission_replay.html` in a browser and load the file for an HTML replay:
+
+```bash
+PYTHONPATH=. python main.py --export-json output/sim_run.json --max-steps 160 --run-full-horizon
+```
+
 Use **A\*** as the primary planner by setting `"primary_planner": "a_star"` under `algorithm` in your mission JSON (same schema as D\* Lite).
 
 ## Configuration

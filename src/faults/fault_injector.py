@@ -35,9 +35,15 @@ class FaultInjector:
         self._schedule: list[dict[str, Any]] = list(fault_config.get("schedule", []))
         self._state = _InjectorState()
         self._active_faults: list[dict[str, Any]] = []
+        self._last_step_events: list[dict[str, Any]] = []
+
+    def get_last_step_events(self) -> List[dict[str, Any]]:
+        """Events that occurred during the most recent :meth:`update` (export / replay)."""
+        return list(self._last_step_events)
 
     def update(self, timestep: int, drone: Drone, environment: Environment) -> None:
         """Fire new schedule entries, expire timed faults, refresh ``active_faults``."""
+        self._last_step_events = []
         self._expire_sensor_fault_if_needed(timestep, drone)
 
         for i, entry in enumerate(self._schedule):
@@ -67,6 +73,14 @@ class FaultInjector:
             description=desc,
             activated_at=timestep,
         )
+        self._last_step_events.append(
+            {
+                "type": "fault_injected",
+                "timestep": timestep,
+                "fault_type": "sensor_degradation",
+                "severity": severity,
+            }
+        )
 
     def _expire_sensor_fault_if_needed(self, timestep: int, drone: Drone) -> None:
         ep = self._state.sensor_episode
@@ -75,6 +89,9 @@ class FaultInjector:
         if timestep < ep.expire_at_timestep:
             return
         drone.restore_sensor(ep.applied_severity)
+        self._last_step_events.append(
+            {"type": "fault_expired", "timestep": timestep, "fault_type": "sensor_degradation"}
+        )
         self._state.sensor_episode = None
 
     def _activate_environmental_hazard(
@@ -84,7 +101,16 @@ class FaultInjector:
         environment: Environment,
     ) -> None:
         hid = str(entry["hazard_id"])
-        environment.trigger_dynamic_hazard_by_id(hid, event_timestep=timestep)
+        ok = environment.trigger_dynamic_hazard_by_id(hid, event_timestep=timestep)
+        if ok:
+            self._last_step_events.append(
+                {
+                    "type": "hazard_spawned",
+                    "timestep": timestep,
+                    "id": hid,
+                    "description": str(entry.get("description", "")),
+                }
+            )
 
     def _refresh_active_fault_list(self, timestep: int) -> None:
         out: list[dict[str, Any]] = []

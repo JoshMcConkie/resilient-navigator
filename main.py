@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +19,7 @@ from src.planners.a_star import AStarPlanner
 from src.planners.base_planner import BasePlanner
 from src.planners.d_star_lite import DStarLitePlanner
 from src.viz.dashboard import Dashboard
+from src.viz import json_export as json_export_helpers
 
 
 def load_config(path: Path) -> dict[str, Any]:
@@ -51,6 +53,33 @@ def _make_planner(config: dict[str, Any]) -> BasePlanner:
     raise NotImplementedError(f"Planner not implemented: {primary}")
 
 
+def _faults_payload_for_export(active: list[dict[str, Any]], step_events: list[dict[str, Any]]) -> dict[str, Any]:
+    """Shape `faults` block for one timeline frame."""
+    injected: dict[str, Any] | None = None
+    for ev in step_events:
+        if ev["type"] == "fault_injected":
+            injected = {
+                "fault_type": ev["fault_type"],
+                "severity": ev.get("severity"),
+            }
+            break
+        if ev["type"] == "hazard_spawned":
+            injected = {
+                "fault_type": "environmental_hazard",
+                "hazard_id": ev["id"],
+                "description": ev.get("description", ""),
+            }
+            break
+    return {"active": active, "injected_this_step": injected}
+
+
+def _fsm_transition_for_timeline(new_entries: list[dict[str, Any]]) -> dict[str, Any] | None:
+    if not new_entries:
+        return None
+    e = new_entries[-1]
+    return {"from": e["from_state"], "to": e["to_state"], "trigger": e["trigger"]}
+
+
 def _skip_blocked_waypoints(
     environment: Environment,
     mission_manager: MissionManager,
@@ -74,8 +103,11 @@ def run_simulation(
     *,
     stop_on_mission_complete: bool = True,
     no_viz: bool = False,
+    export_json_path: Path | None = None,
 ) -> dict[str, Any]:
     """Main loop (plan.md): fault injector → env → sense → detect → FSM → replan → move → mission."""
+    if export_json_path is not None:
+        no_viz = True
     environment = Environment(config)
     drone = Drone(config, environment=environment)
     mission_manager = MissionManager(config)
@@ -104,15 +136,23 @@ def run_simulation(
 
     timestep = 0
     replan_events: list[dict[str, Any]] = []
+    timeline: list[dict[str, Any]] | None = [] if export_json_path is not None else None
+    injector_events_accum: list[dict[str, Any]] = []
+    dashboard_closed = False
+    fsm_log_cursor = 0
+    bat_cap = float(config["drone"]["battery_capacity"])
     if verbose:
         print("Resilient Navigator — simulation with faults + FSM")
         print(f"Grid {environment.width}x{environment.height}, waypoints: {config['mission']['waypoints']}")
 
     while timestep < max_steps:
+        fsm_log_before = len(fsm.get_transition_log())
         fault_injector.update(timestep, drone, environment)
+        step_inj = fault_injector.get_last_step_events()
+        injector_events_accum.extend(step_inj)
         environment.update(timestep)
         _skip_blocked_waypoints(environment, mission_manager, fsm, waypoint_count, timestep)
-        drone.sense(environment)
+        sense_data = drone.sense(environment)
 
         if mission_manager.get_current_target() != last_goal:
             last_goal = mission_manager.get_current_target()
@@ -121,8 +161,12 @@ def run_simulation(
         fault_status = fault_detector.evaluate(drone, environment, planner)
         fsm.update(timestep, fault_status, drone, mission_manager)
 
+        replanned_this_step = False
+        path_before_replan: list[tuple[int, int]] | None = None
         if fsm.requires_replan:
             path_before = list(planner.get_full_path())
+            path_before_replan = path_before
+            replanned_this_step = True
             try:
                 planner.replan(drone.position, mission_manager.get_current_target(), environment)
                 path_ok = bool(planner.get_full_path())
@@ -169,6 +213,52 @@ def run_simulation(
         mission_manager.update(drone.position)
         fsm.check_depleted_battery_abort(timestep, drone, mission_manager)
 
+        if timeline is not None:
+            log_full = fsm.get_transition_log()
+            new_fsm = log_full[fsm_log_cursor:]
+            fsm_log_cursor = len(log_full)
+            wp = mission_manager.get_progress()
+            pos_est = sense_data.get("position_estimate", (float(drone.position[0]), float(drone.position[1])))
+            if isinstance(pos_est, tuple):
+                pe = [float(pos_est[0]), float(pos_est[1])]
+            else:
+                pe = [float(pos_est[0]), float(pos_est[1])]
+            planned = [[int(p[0]), int(p[1])] for p in planner.get_full_path()]
+            timeline.append(
+                {
+                    "timestep": timestep,
+                    "drone": {
+                        "position": [int(drone.position[0]), int(drone.position[1])],
+                        "position_estimate": pe,
+                        "heading": float(drone.heading),
+                        "battery": float(drone.battery),
+                        "battery_pct": round(100.0 * float(drone.battery) / bat_cap, 4) if bat_cap > 0 else 0.0,
+                        "sensor_noise_level": float(drone.sensor_noise_level),
+                        "speed_scale": float(drone.get_telemetry()["speed_scale"]),
+                    },
+                    "fsm": {
+                        "state": fsm.get_state(),
+                        "transition": _fsm_transition_for_timeline(new_fsm),
+                    },
+                    "mission": {
+                        "current_waypoint_index": int(wp["current_waypoint_index"]),
+                        "current_target": [int(wp["current_target"][0]), int(wp["current_target"][1])],
+                        "waypoints_completed": int(wp["waypoints_completed"]),
+                        "total_waypoints": int(wp["waypoints_total"]),
+                        "status": str(wp["mission_status"]),
+                    },
+                    "planner": {
+                        "name": json_export_helpers.planner_display_name(planner),
+                        "planned_path": planned,
+                        "replanned_this_step": replanned_this_step,
+                        "path_before_replan": (
+                            [[int(x), int(y)] for x, y in path_before_replan] if path_before_replan else None
+                        ),
+                    },
+                    "faults": _faults_payload_for_export(fault_injector.get_active_faults(), step_inj),
+                }
+            )
+
         dashboard.render(
             drone,
             environment,
@@ -179,6 +269,7 @@ def run_simulation(
             fault_injector=fault_injector,
         )
         if dashboard.is_closed:
+            dashboard_closed = True
             if verbose:
                 print("Dashboard window closed; stopping simulation.")
             break
@@ -207,6 +298,34 @@ def run_simulation(
     dashboard.finalize()
 
     transition_log = fsm.get_transition_log()
+    export_payload: dict[str, Any] | None = None
+    if export_json_path is not None and timeline is not None:
+        merged_events = json_export_helpers.merge_export_events(transition_log, injector_events_accum)
+        mstatus = mission_manager.mission_status
+        mresult = json_export_helpers.mission_result_string(
+            mstatus, fsm.get_state(), float(drone.battery), dashboard_closed
+        )
+        export_payload = {
+            "metadata": {
+                "config": json_export_helpers.snapshot_config(config),
+                "total_timesteps": len(timeline),
+                "mission_result": mresult,
+                "planner_used": json_export_helpers.planner_display_name(planner),
+                "total_replans": len(replan_events),
+                "export_timestamp": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace(
+                    "+00:00", "Z"
+                ),
+            },
+            "environment": json_export_helpers.build_environment_export(config),
+            "timeline": timeline,
+            "events": merged_events,
+            "fsm_transition_log": transition_log,
+        }
+        export_json_path.parent.mkdir(parents=True, exist_ok=True)
+        export_json_path.write_text(json.dumps(export_payload, indent=2), encoding="utf-8")
+        if verbose:
+            print(f"Wrote mission export JSON to {export_json_path}")
+
     if verbose:
         print(f"\nFinished after timestep {timestep}.")
         print("FSM transition log (full):")
@@ -215,11 +334,14 @@ def run_simulation(
         print("Replan events (path before / after):")
         for ev in replan_events:
             print(f"  {ev}")
-    return {
+    out: dict[str, Any] = {
         "final_timestep": timestep,
         "fsm_transition_log": transition_log,
         "replan_events": replan_events,
     }
+    if export_payload is not None:
+        out["export"] = export_payload
+    return out
 
 
 def main() -> None:
@@ -249,15 +371,26 @@ def main() -> None:
         action="store_true",
         help="Disable matplotlib dashboard (headless / CI)",
     )
+    parser.add_argument(
+        "--export-json",
+        type=Path,
+        default=None,
+        metavar="FILE",
+        help="Write full mission replay JSON to FILE and run headless (no Matplotlib)",
+    )
     args = parser.parse_args()
 
     config = load_config(args.config)
+    export_path = args.export_json
+    if export_path is not None:
+        export_path = export_path.resolve()
     _ = run_simulation(
         config,
         args.max_steps,
         verbose=not args.quiet,
         stop_on_mission_complete=not args.run_full_horizon,
-        no_viz=args.no_viz,
+        no_viz=args.no_viz or export_path is not None,
+        export_json_path=export_path,
     )
 
 

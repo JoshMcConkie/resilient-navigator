@@ -1,0 +1,904 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Resilient Navigator — Mission Replay</title>
+  <style>
+    :root {
+      --bg: #0a0a1a;
+      --panel: #1a1a2e;
+      --border: #16213e;
+      --text: #e0e0e0;
+      --muted: #8892a0;
+      --nominal: #00ff88;
+      --degraded: #ffeb3b;
+      --replanning: #ff9800;
+      --safe: #f44336;
+      --abort: #b71c1c;
+      --cyan: #00bcd4;
+      --green: #00ff88;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      background: var(--bg); color: var(--text); min-height: 100vh;
+    }
+    .landing {
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      min-height: 100vh; padding: 2rem; text-align: center;
+    }
+    .landing h1 {
+      font-size: 1.4rem; letter-spacing: 0.15em; text-transform: uppercase;
+      color: var(--nominal); text-shadow: 0 0 12px rgba(0,255,136,0.4);
+      margin-bottom: 0.5rem;
+    }
+    .landing p { color: var(--muted); max-width: 32rem; }
+    .btn {
+      margin-top: 1.5rem; padding: 0.75rem 1.5rem; cursor: pointer;
+      background: var(--panel); border: 1px solid var(--border); color: var(--text);
+      font-family: inherit; font-size: 1rem; border-radius: 4px;
+    }
+    .btn:hover { border-color: var(--nominal); color: var(--nominal); }
+    #file-input { display: none; }
+
+    .app { display: none; flex-direction: column; min-height: 100vh; }
+    .app.visible { display: flex; }
+
+    .titlebar {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 0.6rem 1rem; background: var(--panel); border-bottom: 1px solid var(--border);
+      font-size: 0.85rem; letter-spacing: 0.12em; text-transform: uppercase;
+    }
+    .titlebar span.accent { color: var(--nominal); }
+
+    .main-row {
+      display: flex; flex-wrap: wrap; flex: 1; gap: 0;
+    }
+    .map-col {
+      flex: 1 1 65%; min-width: 320px; padding: 0.75rem;
+      display: flex; align-items: flex-start; justify-content: center;
+      background: #0d0d20;
+    }
+    #map-wrap {
+      position: relative; border: 1px solid var(--border); border-radius: 4px;
+      background: #1a1a2e; max-width: 100%;
+    }
+    #grid-canvas { display: block; vertical-align: top; }
+
+    .telemetry-col {
+      flex: 1 1 320px; max-width: 480px; padding: 0.75rem;
+      display: flex; flex-direction: column; gap: 0.75rem;
+    }
+    .panel {
+      background: var(--panel); border: 1px solid var(--border); border-radius: 4px;
+      padding: 0.75rem;
+    }
+    .panel h3 {
+      margin: 0 0 0.5rem 0; font-size: 0.7rem; letter-spacing: 0.1em;
+      text-transform: uppercase; color: var(--muted);
+    }
+    .mono { font-family: ui-monospace, monospace; font-size: 0.85rem; }
+    .fsm-badge {
+      display: inline-block; padding: 0.25rem 0.5rem; border-radius: 4px;
+      font-weight: bold; font-size: 0.95rem; transition: background 0.2s, color 0.2s;
+    }
+    .bar-track {
+      height: 8px; background: #2a2a3e; border-radius: 4px; overflow: hidden; margin-top: 0.35rem;
+    }
+    .bar-fill { height: 100%; border-radius: 4px; transition: width 0.15s; }
+    .wp-row { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-top: 0.35rem; font-size: 0.75rem; }
+    .wp { padding: 0.15rem 0.35rem; border-radius: 3px; border: 1px solid #4fc3f7; color: #4fc3f7; }
+    .wp.done { opacity: 0.35; text-decoration: line-through; }
+    .wp.current { box-shadow: 0 0 8px #ffeb3b; border-color: #ffeb3b; color: #fff; }
+
+    .playback {
+      padding: 0.75rem 1rem; border-top: 1px solid var(--border);
+      background: var(--panel);
+    }
+    .pb-btns { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem; }
+    .pb-btns button {
+      padding: 0.4rem 0.65rem; cursor: pointer; background: #252540; border: 1px solid var(--border);
+      color: var(--text); border-radius: 4px; font-family: inherit;
+    }
+    .pb-btns button:hover { border-color: var(--cyan); }
+    select { background: #252540; color: var(--text); border: 1px solid var(--border); padding: 0.35rem; border-radius: 4px; }
+    .scrub-wrap { margin-top: 0.5rem; position: relative; height: 28px; }
+    .scrub-bg {
+      position: absolute; left: 0; right: 0; top: 8px; height: 10px; background: #2a2a3e;
+      border-radius: 5px; cursor: pointer;
+    }
+    .scrub-markers { position: absolute; left: 0; right: 0; top: 0; height: 28px; pointer-events: none; }
+    .scrub-markers .dot {
+      position: absolute; top: 6px; width: 10px; height: 10px; margin-left: -5px; border-radius: 50%;
+      pointer-events: auto; cursor: pointer;
+    }
+    .scrub-fill {
+      position: absolute; left: 0; top: 8px; height: 10px; background: var(--cyan);
+      border-radius: 5px; pointer-events: none; opacity: 0.5;
+    }
+    .scrub-knob {
+      position: absolute; top: 4px; width: 14px; height: 18px; margin-left: -7px;
+      background: var(--nominal); border-radius: 3px; cursor: grab; box-shadow: 0 0 6px rgba(0,255,136,0.5);
+    }
+
+    .event-strip {
+      padding: 0.5rem 1rem 1rem; border-top: 1px solid var(--border);
+    }
+    .event-strip h3 { font-size: 0.7rem; color: var(--muted); margin: 0 0 0.35rem 0; letter-spacing: 0.08em; }
+    .strip-inner { position: relative; height: 36px; background: #12122a; border-radius: 4px; border: 1px solid var(--border); }
+    .strip-labels { font-size: 0.65rem; color: var(--muted); padding: 0.25rem 0; min-height: 1.2rem; }
+
+    .fsm-table-wrap {
+      padding: 0.75rem 1rem; border-top: 1px solid var(--border); max-height: 200px; overflow: auto;
+    }
+    table.fsm-log { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+    table.fsm-log th { text-align: left; color: var(--muted); padding: 0.35rem; border-bottom: 1px solid var(--border); }
+    table.fsm-log td { padding: 0.35rem; border-bottom: 1px solid #252540; cursor: pointer; }
+    table.fsm-log tr:hover td { background: #252540; }
+    table.fsm-log tr.hl td { background: #2a2040; }
+
+    .charts {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; padding: 0.75rem 1rem 1.5rem;
+    }
+    @media (max-width: 1100px) {
+      .charts { grid-template-columns: 1fr; }
+      .main-row { flex-direction: column; }
+    }
+    .chart-box { background: var(--panel); border: 1px solid var(--border); border-radius: 4px; padding: 0.5rem; }
+    .chart-box h4 { margin: 0 0 0.35rem 0; font-size: 0.65rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+    .chart-canvas { width: 100%; height: 140px; display: block; }
+  </style>
+</head>
+<body>
+  <div class="landing" id="landing">
+    <h1>Resilient Navigator</h1>
+    <p>Mission replay dashboard. Load a JSON file exported from the simulator (<code>python main.py --export-json …</code>).</p>
+    <button type="button" class="btn" id="btn-load">Load Simulation JSON</button>
+    <input type="file" id="file-input" accept=".json,application/json" />
+  </div>
+
+  <div class="app" id="app">
+    <div class="titlebar">
+      <span><span class="accent">RESILIENT NAVIGATOR</span> — MISSION REPLAY</span>
+      <button type="button" class="btn" style="margin:0;padding:0.35rem 0.75rem;font-size:0.75rem;" id="btn-reload">Load JSON</button>
+    </div>
+    <div class="main-row">
+      <div class="map-col">
+        <div id="map-wrap">
+          <canvas id="grid-canvas"></canvas>
+        </div>
+      </div>
+      <div class="telemetry-col">
+        <div class="panel">
+          <h3>Telemetry</h3>
+          <div class="mono">FSM: <span id="fsm-badge" class="fsm-badge">NOMINAL</span></div>
+          <div class="mono" style="margin-top:0.35rem">Planner: <span id="planner-name">—</span></div>
+          <div class="mono">Timestep: <span id="ts-display">0</span> / <span id="ts-max">0</span></div>
+        </div>
+        <div class="panel">
+          <h3>Sensor health</h3>
+          <div class="mono"><span id="noise-val">0</span> / <span id="noise-max">0.5</span></div>
+          <div class="bar-track"><div class="bar-fill" id="noise-bar" style="width:0%;background:linear-gradient(90deg,#2ecc71,#f1c40f);"></div></div>
+          <div class="mono" style="margin-top:0.35rem;font-size:0.7rem;color:var(--muted)">
+            warn <span id="warn-line">—</span> · crit <span id="crit-line">—</span>
+          </div>
+        </div>
+        <div class="panel">
+          <h3>Battery</h3>
+          <div class="bar-track"><div class="bar-fill" id="bat-bar" style="width:100%;background:#27ae60;"></div></div>
+          <div class="mono" id="bat-pct">100%</div>
+        </div>
+        <div class="panel">
+          <h3>Mission progress</h3>
+          <div class="wp-row" id="wp-row"></div>
+          <div class="mono" id="wp-summary" style="margin-top:0.35rem">—</div>
+        </div>
+        <div class="panel">
+          <h3>Active faults</h3>
+          <div class="mono" id="faults-text" style="font-size:0.8rem">(none)</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="playback">
+      <div class="pb-btns">
+        <button type="button" id="pb-start" title="Home">|◁</button>
+        <button type="button" id="pb-prev" title="Prev">◁</button>
+        <button type="button" id="pb-play">▶ Play</button>
+        <button type="button" id="pb-next" title="Next">▷</button>
+        <button type="button" id="pb-end" title="End">▷|</button>
+        <label class="mono" style="margin-left:0.5rem">Speed:</label>
+        <select id="pb-speed">
+          <option value="0.5">0.5x</option>
+          <option value="1" selected>1x</option>
+          <option value="2">2x</option>
+          <option value="5">5x</option>
+          <option value="10">10x</option>
+        </select>
+      </div>
+      <div class="scrub-wrap" id="scrub-wrap">
+        <div class="scrub-bg" id="scrub-bg"></div>
+        <div class="scrub-fill" id="scrub-fill" style="width:0%"></div>
+        <div class="scrub-markers" id="scrub-markers"></div>
+        <div class="scrub-knob" id="scrub-knob" style="left:0%"></div>
+      </div>
+    </div>
+
+    <div class="event-strip">
+      <h3>Event timeline</h3>
+      <div class="strip-inner" id="event-strip"></div>
+      <div class="strip-labels mono" id="event-labels"></div>
+    </div>
+
+    <div class="fsm-table-wrap">
+      <h3 style="margin:0 0 0.5rem 0;font-size:0.7rem;color:var(--muted);letter-spacing:0.08em;">FSM transition log</h3>
+      <table class="fsm-log" id="fsm-table">
+        <thead><tr><th>Time</th><th>From</th><th>To</th><th>Trigger</th></tr></thead>
+        <tbody id="fsm-tbody"></tbody>
+      </table>
+    </div>
+
+    <div class="charts">
+      <div class="chart-box"><h4>Sensor noise</h4><canvas class="chart-canvas" id="chart-noise" width="400" height="140"></canvas></div>
+      <div class="chart-box"><h4>Battery %</h4><canvas class="chart-canvas" id="chart-bat" width="400" height="140"></canvas></div>
+      <div class="chart-box"><h4>FSM state timeline</h4><canvas class="chart-canvas" id="chart-fsm" width="400" height="140"></canvas></div>
+      <div class="chart-box"><h4>Speed scale</h4><canvas class="chart-canvas" id="chart-speed" width="400" height="140"></canvas></div>
+    </div>
+  </div>
+
+  <script>
+(function () {
+  'use strict';
+
+  var DATA = null;
+  var idx = 0;
+  var playing = false;
+  var lastFrame = 0;
+  var acc = 0;
+  var flashFrames = 0;
+  var flashPath = null;
+
+  var FSM_COL = {
+    NOMINAL: '#00ff88',
+    DEGRADED: '#ffeb3b',
+    REPLANNING: '#ff9800',
+    SAFE_MODE: '#f44336',
+    ABORT: '#b71c1c'
+  };
+
+  function $(id) { return document.getElementById(id); }
+
+  function parseJSON(text) {
+    try { return JSON.parse(text); } catch (e) { alert('Invalid JSON'); return null; }
+  }
+
+  function loadFile(file) {
+    var r = new FileReader();
+    r.onload = function () {
+      var d = parseJSON(r.result);
+      if (!d || !d.timeline || !d.metadata) return;
+      DATA = d;
+      $('landing').style.display = 'none';
+      $('app').classList.add('visible');
+      initApp();
+    };
+    r.readAsText(file);
+  }
+
+  $('btn-load').onclick = function () { $('file-input').click(); };
+  $('file-input').onchange = function () {
+    var f = this.files && this.files[0];
+    if (f) loadFile(f);
+    this.value = '';
+  };
+  $('btn-reload').onclick = function () { $('file-input').click(); };
+
+  function initApp() {
+    idx = 0;
+    playing = false;
+    $('planner-name').textContent = DATA.metadata.planner_used || '—';
+    $('ts-max').textContent = String(DATA.metadata.total_timesteps || DATA.timeline.length);
+    $('noise-max').textContent = String(
+      (DATA.metadata.config && DATA.metadata.config.drone && DATA.metadata.config.drone.max_sensor_noise) || 0.5
+    );
+    var algo = DATA.metadata.config && DATA.metadata.config.algorithm;
+    if (algo) {
+      $('warn-line').textContent = String(algo.sensor_degradation_threshold);
+      $('crit-line').textContent = String(algo.critical_fault_threshold);
+    }
+    buildWaypoints();
+    buildFsmTable();
+    buildEventStrip();
+    buildScrubMarkers();
+    resizeCanvas();
+    drawStaticCharts();
+    updateFrame();
+    window.addEventListener('resize', function () { resizeCanvas(); updateFrame(); });
+  }
+
+  function buildWaypoints() {
+    var wps = (DATA.metadata.config && DATA.metadata.config.mission && DATA.metadata.config.mission.waypoints) || [];
+    var row = $('wp-row');
+    row.innerHTML = '';
+    wps.forEach(function (w, i) {
+      var el = document.createElement('span');
+      el.className = 'wp';
+      el.textContent = 'WP' + (i + 1);
+      el.dataset.i = i;
+      row.appendChild(el);
+    });
+  }
+
+  function buildFsmTable() {
+    var tb = $('fsm-tbody');
+    tb.innerHTML = '';
+    (DATA.fsm_transition_log || []).forEach(function (e, rowi) {
+      var tr = document.createElement('tr');
+      tr.innerHTML = '<td>' + e.timestep + '</td><td>' + e.from_state + '</td><td>' + e.to_state + '</td><td>' + e.trigger + '</td>';
+      tr.onclick = function () { jumpToTimestep(e.timestep); };
+      tr.dataset.t = e.timestep;
+      tb.appendChild(tr);
+    });
+  }
+
+  function buildEventStrip() {
+    var strip = $('event-strip');
+    strip.innerHTML = '';
+    var evs = DATA.events || [];
+    var maxT = Math.max(1, DATA.timeline.length - 1);
+    evs.forEach(function (ev) {
+      var d = document.createElement('div');
+      d.className = 'dot';
+      d.style.left = (100 * ev.timestep / maxT) + '%';
+      var col = '#4488ff';
+      if (ev.type === 'hazard_spawned') col = '#ff4444';
+      else if (ev.type === 'fault_injected') col = '#ff9800';
+      else if (ev.type === 'fault_expired') col = '#66ff66';
+      else if (ev.type === 'fsm_transition') col = '#4fc3f7';
+      d.style.background = col;
+      d.style.border = '1px solid #fff';
+      d.title = tooltipFor(ev);
+      d.onclick = function (e) { e.stopPropagation(); jumpToTimestep(ev.timestep); };
+      strip.appendChild(d);
+    });
+  }
+
+  function tooltipFor(ev) {
+    if (ev.type === 'hazard_spawned') return 't=' + ev.timestep + ' hazard ' + (ev.id || '');
+    if (ev.type === 'fault_injected') return 't=' + ev.timestep + ' ' + ev.fault_type;
+    if (ev.type === 'fault_expired') return 't=' + ev.timestep + ' expired';
+    if (ev.type === 'fsm_transition') return 't=' + ev.timestep + ' ' + ev.from + '→' + ev.to;
+    return JSON.stringify(ev);
+  }
+
+  function buildScrubMarkers() {
+    var box = $('scrub-markers');
+    box.innerHTML = '';
+    var maxT = Math.max(1, DATA.timeline.length - 1);
+    (DATA.events || []).forEach(function (ev) {
+      var d = document.createElement('div');
+      d.className = 'dot';
+      d.style.left = (100 * ev.timestep / maxT) + '%';
+      if (ev.type === 'hazard_spawned') d.style.background = '#ff4444';
+      else if (ev.type === 'fault_injected') d.style.background = '#ff9800';
+      else if (ev.type === 'fault_expired') d.style.background = '#66ff66';
+      else d.style.background = '#4fc3f7';
+      d.style.top = '10px';
+      d.title = tooltipFor(ev);
+      d.onclick = function (e) { e.stopPropagation(); jumpToTimestep(ev.timestep); };
+      box.appendChild(d);
+    });
+  }
+
+  var lastFlashIdx = -1;
+
+  function jumpTo(frameIndex) {
+    var mx = DATA.timeline.length - 1;
+    idx = Math.max(0, Math.min(mx, frameIndex | 0));
+    lastFlashIdx = -1;
+    updateFrame();
+  }
+
+  function jumpToTimestep(t) {
+    for (var i = 0; i < DATA.timeline.length; i++) {
+      if (DATA.timeline[i].timestep === t) {
+        jumpTo(i);
+        return;
+      }
+    }
+    jumpTo(Math.min(DATA.timeline.length - 1, Math.max(0, t | 0)));
+  }
+
+  function resizeCanvas() {
+    var wrap = $('map-wrap');
+    var gw = DATA.environment.grid_size[0];
+    var gh = DATA.environment.grid_size[1];
+    var maxW = Math.min(wrap.clientWidth || 800, window.innerWidth * 0.62);
+    var maxH = window.innerHeight * 0.55;
+    var cs = Math.min(maxW / gw, maxH / gh, 14);
+    var dpr = window.devicePixelRatio || 1;
+    var c = $('grid-canvas');
+    c.width = Math.floor(gw * cs * dpr);
+    c.height = Math.floor(gh * cs * dpr);
+    c.style.width = (gw * cs) + 'px';
+    c.style.height = (gh * cs) + 'px';
+    c.dataset.cell = cs;
+    c.dataset.dpr = dpr;
+    c.dataset.gw = gw;
+    c.dataset.gh = gh;
+  }
+
+  function cellToScreen(x, y, cs, gh) {
+    return { sx: x * cs, sy: (gh - 1 - y) * cs };
+  }
+
+  function drawMap() {
+    var c = $('grid-canvas');
+    var ctx = c.getContext('2d');
+    var dpr = +c.dataset.dpr || 1;
+    var cs = +c.dataset.cell;
+    var gw = +c.dataset.gw;
+    var gh = +c.dataset.gh;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, gw * cs, gh * cs);
+    ctx.fillStyle = '#1a1a2e';
+    ctx.fillRect(0, 0, gw * cs, gh * cs);
+
+    // Grid lines every 10
+    ctx.strokeStyle = '#16213e';
+    ctx.lineWidth = 1;
+    for (var gx = 0; gx <= gw; gx += 10) {
+      ctx.beginPath();
+      ctx.moveTo(gx * cs, 0);
+      ctx.lineTo(gx * cs, gh * cs);
+      ctx.stroke();
+    }
+    for (var gy = 0; gy <= gh; gy += 10) {
+      ctx.beginPath();
+      ctx.moveTo(0, gy * cs);
+      ctx.lineTo(gw * cs, gy * cs);
+      ctx.stroke();
+    }
+
+    var staticSet = {};
+    (DATA.environment.static_obstacles || []).forEach(function (p) {
+      staticSet[p[0] + ',' + p[1]] = true;
+    });
+
+    var hzInfo = DATA.environment.dynamic_hazards || [];
+    var tNow = DATA.timeline[idx].timestep;
+
+    function cellType(x, y) {
+      if (staticSet[x + ',' + y]) return 'static';
+      for (var i = 0; i < hzInfo.length; i++) {
+        var h = hzInfo[i];
+        var trig = h.trigger_timestep;
+        if (trig == null || tNow < trig) continue;
+        var cells = h.cells || [];
+        for (var j = 0; j < cells.length; j++) {
+          if (cells[j][0] === x && cells[j][1] === y) {
+            return h.type === 'no_fly_zone' ? 'nfz' : 'obs';
+          }
+        }
+      }
+      return 'free';
+    }
+
+    // Cells
+    var pulse = 0.5 + 0.5 * Math.sin(Date.now() / 200);
+    for (var y = 0; y < gh; y++) {
+      for (var x = 0; x < gw; x++) {
+        var ty = cellType(x, y);
+        var p = cellToScreen(x, y, cs, gh);
+        if (ty === 'static') {
+          ctx.fillStyle = '#444';
+          ctx.fillRect(p.sx, p.sy, cs, cs);
+        } else if (ty === 'nfz') {
+          var just = hzInfo.some(function (h) {
+            return h.type === 'no_fly_zone' && h.trigger_timestep === tNow &&
+              (h.cells || []).some(function (cc) { return cc[0] === x && cc[1] === y; });
+          });
+          ctx.fillStyle = just ? 'rgba(255,68,68,' + (0.4 + 0.3 * pulse) + ')' : 'rgba(255,68,68,0.55)';
+          ctx.fillRect(p.sx, p.sy, cs, cs);
+        } else if (ty === 'obs') {
+          ctx.fillStyle = '#555';
+          ctx.fillRect(p.sx, p.sy, cs, cs);
+        }
+      }
+    }
+
+    var fr = DATA.timeline[idx];
+    var algo = DATA.metadata.config.algorithm;
+    var sr = parseInt(String(DATA.metadata.config.drone.sensor_range), 10) || 0;
+    if (algo && fr.drone) {
+      var px = fr.drone.position[0];
+      var py = fr.drone.position[1];
+      var pc = cellToScreen(px + 0.5, py + 0.5, cs, gh);
+      ctx.beginPath();
+      ctx.fillStyle = 'rgba(0,255,136,0.12)';
+      ctx.arc(pc.sx, pc.sy, sr * cs, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Trail
+    var trailLen = 50;
+    var start = Math.max(0, idx - trailLen);
+    ctx.lineWidth = 2;
+    for (var i = start; i < idx; i++) {
+      var a = DATA.timeline[i].drone.position;
+      var b = DATA.timeline[i + 1].drone.position;
+      var pa = cellToScreen(a[0] + 0.5, a[1] + 0.5, cs, gh);
+      var pb = cellToScreen(b[0] + 0.5, b[1] + 0.5, cs, gh);
+      var alpha = (i - start) / trailLen;
+      ctx.strokeStyle = 'rgba(0,255,136,' + (0.15 + 0.85 * alpha) + ')';
+      ctx.beginPath();
+      ctx.moveTo(pa.sx, pa.sy);
+      ctx.lineTo(pb.sx, pb.sy);
+      ctx.stroke();
+    }
+
+    // Flash old path on replan
+    if (flashPath && flashFrames > 0) {
+      ctx.strokeStyle = 'rgba(255,80,80,0.85)';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([4, 4]);
+      for (var fi = 0; fi < flashPath.length - 1; fi++) {
+        var fa = flashPath[fi];
+        var fb = flashPath[fi + 1];
+        var fpa = cellToScreen(fa[0] + 0.5, fa[1] + 0.5, cs, gh);
+        var fpb = cellToScreen(fb[0] + 0.5, fb[1] + 0.5, cs, gh);
+        ctx.beginPath();
+        ctx.moveTo(fpa.sx, fpa.sy);
+        ctx.lineTo(fpb.sx, fpb.sy);
+        ctx.stroke();
+      }
+      ctx.setLineDash([]);
+      flashFrames--;
+    }
+
+    // Planned path
+    var path = (fr.planner && fr.planner.planned_path) || [];
+    if (path.length >= 2) {
+      ctx.strokeStyle = '#00bcd4';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([6, 4]);
+      for (var pi = 0; pi < path.length - 1; pi++) {
+        var pa = cellToScreen(path[pi][0] + 0.5, path[pi][1] + 0.5, cs, gh);
+        var pb = cellToScreen(path[pi + 1][0] + 0.5, path[pi + 1][1] + 0.5, cs, gh);
+        ctx.beginPath();
+        ctx.moveTo(pa.sx, pa.sy);
+        ctx.lineTo(pb.sx, pb.sy);
+        ctx.stroke();
+      }
+      ctx.setLineDash([]);
+    }
+
+    // Waypoints
+    var wps = (DATA.metadata.config.mission && DATA.metadata.config.mission.waypoints) || [];
+    var cwi = fr.mission.current_waypoint_index;
+    wps.forEach(function (w, wi) {
+      var wx = w[0], wy = w[1];
+      var p = cellToScreen(wx + 0.5, wy + 0.5, cs, gh);
+      ctx.save();
+      ctx.translate(p.sx, p.sy);
+      ctx.rotate(Math.PI / 4);
+      ctx.fillStyle = wi < cwi ? 'rgba(79,195,247,0.35)' : '#4fc3f7';
+      if (wi === cwi && fr.mission.status === 'in_progress') {
+        ctx.shadowColor = '#ffeb3b';
+        ctx.shadowBlur = 12;
+      }
+      var s = cs * 0.35;
+      ctx.fillRect(-s, -s, s * 2, s * 2);
+      ctx.restore();
+      ctx.fillStyle = '#fff';
+      ctx.font = 'bold ' + Math.max(9, cs * 0.45) + 'px monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(String(wi + 1), p.sx, p.sy);
+    });
+
+    // Drone triangle
+    if (fr.drone) {
+      var dp = cellToScreen(fr.drone.position[0] + 0.5, fr.drone.position[1] + 0.5, cs, gh);
+      var heading = fr.drone.heading;
+      var r = cs * 0.42;
+      ctx.save();
+      ctx.translate(dp.sx, dp.sy);
+      ctx.rotate(heading);
+      ctx.shadowColor = '#00ff88';
+      ctx.shadowBlur = 8;
+      ctx.fillStyle = '#00ff88';
+      ctx.beginPath();
+      ctx.moveTo(r, 0);
+      ctx.lineTo(r * Math.cos(2.094), r * Math.sin(2.094));
+      ctx.lineTo(r * Math.cos(-2.094), r * Math.sin(-2.094));
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    }
+  }
+
+  function updateTelemetry() {
+    var fr = DATA.timeline[idx];
+    var st = fr.fsm.state;
+    var badge = $('fsm-badge');
+    badge.textContent = st;
+    badge.style.background = FSM_COL[st] || '#888';
+    badge.style.color = (st === 'DEGRADED' || st === 'REPLANNING') ? '#111' : '#fff';
+
+    $('ts-display').textContent = String(fr.timestep);
+    $('noise-val').textContent = fr.drone.sensor_noise_level.toFixed(3);
+    var maxN = parseFloat($('noise-max').textContent) || 0.5;
+    $('noise-bar').style.width = Math.min(100, 100 * fr.drone.sensor_noise_level / maxN) + '%';
+
+    var bp = fr.drone.battery_pct;
+    $('bat-pct').textContent = bp.toFixed(1) + '%';
+    $('bat-bar').style.width = bp + '%';
+    $('bat-bar').style.background = bp > 50 ? '#27ae60' : bp > 20 ? '#f1c40f' : '#e74c3c';
+
+    var wps = (DATA.metadata.config.mission && DATA.metadata.config.mission.waypoints) || [];
+    var cwi = fr.mission.current_waypoint_index;
+    var els = $('wp-row').querySelectorAll('.wp');
+    for (var i = 0; i < els.length; i++) {
+      els[i].className = 'wp' + (i < cwi ? ' done' : '') + (i === cwi && fr.mission.status === 'in_progress' ? ' current' : '');
+    }
+    $('wp-summary').textContent = 'Waypoint ' + (cwi + 1) + ' / ' + wps.length + ' · ' + fr.mission.status;
+
+    var faults = fr.faults.active || [];
+    $('faults-text').textContent = faults.length ? JSON.stringify(faults, null, 0) : '(none)';
+
+    // FSM table highlight
+    var rows = $('fsm-tbody').querySelectorAll('tr');
+    for (var r = 0; r < rows.length; r++) {
+      var tt = parseInt(rows[r].dataset.t, 10);
+      rows[r].className = (tt === fr.timestep) ? 'hl' : '';
+    }
+
+    $('scrub-fill').style.width = (100 * idx / Math.max(1, DATA.timeline.length - 1)) + '%';
+    $('scrub-knob').style.left = (100 * idx / Math.max(1, DATA.timeline.length - 1)) + '%';
+  }
+
+  function drawStaticCharts() {
+    drawNoiseChart();
+    drawBatChart();
+    drawFsmBar();
+    drawSpeedChart();
+  }
+
+  function chartPadding() { return { l: 40, r: 8, t: 8, b: 22 }; }
+
+  function drawNoiseChart() {
+    var c = $('chart-noise');
+    var ctx = c.getContext('2d');
+    var w = c.width, h = c.height;
+    var pad = chartPadding();
+    ctx.fillStyle = '#1a1a2e';
+    ctx.fillRect(0, 0, w, h);
+    var algo = DATA.metadata.config.algorithm;
+    var maxN = DATA.metadata.config.drone.max_sensor_noise;
+    var warn = algo.sensor_degradation_threshold;
+    var crit = algo.critical_fault_threshold;
+    var T = DATA.timeline.length;
+    var innerW = w - pad.l - pad.r;
+    var innerH = h - pad.t - pad.b;
+    // bands
+    ctx.fillStyle = 'rgba(46,204,113,0.15)';
+    ctx.fillRect(pad.l, pad.t, innerW, innerH * (warn / maxN));
+    ctx.fillStyle = 'rgba(241,196,15,0.12)';
+    ctx.fillRect(pad.l, pad.t + innerH * (warn / maxN), innerW, innerH * ((crit - warn) / maxN));
+    ctx.fillStyle = 'rgba(231,76,60,0.12)';
+    ctx.fillRect(pad.l, pad.t + innerH * (crit / maxN), innerW, innerH * (1 - crit / maxN));
+    ctx.strokeStyle = '#888';
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath();
+    ctx.moveTo(pad.l, pad.t + innerH * (1 - warn / maxN));
+    ctx.lineTo(pad.l + innerW, pad.t + innerH * (1 - warn / maxN));
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(pad.l, pad.t + innerH * (1 - crit / maxN));
+    ctx.lineTo(pad.l + innerW, pad.t + innerH * (1 - crit / maxN));
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.strokeStyle = '#4fc3f7';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    DATA.timeline.forEach(function (fr, i) {
+      var x = pad.l + (i / Math.max(1, T - 1)) * innerW;
+      var y = pad.t + innerH * (1 - fr.drone.sensor_noise_level / maxN);
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+    c._playhead = function (ix) {
+      var x = pad.l + (ix / Math.max(1, T - 1)) * innerW;
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(x, pad.t);
+      ctx.lineTo(x, pad.t + innerH);
+      ctx.stroke();
+    };
+  }
+
+  function drawBatChart() {
+    var c = $('chart-bat');
+    var ctx = c.getContext('2d');
+    var w = c.width, h = c.height;
+    var pad = chartPadding();
+    ctx.fillStyle = '#1a1a2e';
+    ctx.fillRect(0, 0, w, h);
+    var innerW = w - pad.l - pad.r;
+    var innerH = h - pad.t - pad.b;
+    ctx.fillStyle = 'rgba(46,204,113,0.12)';
+    ctx.fillRect(pad.l, pad.t + innerH * 0.5, innerW, innerH * 0.5);
+    ctx.fillStyle = 'rgba(241,196,15,0.12)';
+    ctx.fillRect(pad.l, pad.t + innerH * 0.2, innerW, innerH * 0.3);
+    ctx.fillStyle = 'rgba(231,76,60,0.15)';
+    ctx.fillRect(pad.l, pad.t, innerW, innerH * 0.2);
+    ctx.strokeStyle = '#66bb6a';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    var T = DATA.timeline.length;
+    DATA.timeline.forEach(function (fr, i) {
+      var x = pad.l + (i / Math.max(1, T - 1)) * innerW;
+      var y = pad.t + innerH * (1 - fr.drone.battery_pct / 100);
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+    c._playhead = function (ix) {
+      var x = pad.l + (ix / Math.max(1, T - 1)) * innerW;
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(x, pad.t);
+      ctx.lineTo(x, pad.t + innerH);
+      ctx.stroke();
+    };
+  }
+
+  function drawFsmBar() {
+    var c = $('chart-fsm');
+    var ctx = c.getContext('2d');
+    var w = c.width, h = c.height;
+    ctx.fillStyle = '#1a1a2e';
+    ctx.fillRect(0, 0, w, h);
+    var pad = 8;
+    var innerW = w - pad * 2;
+    var barH = 40;
+    var y0 = (h - barH) / 2;
+    var T = DATA.timeline.length;
+    if (T < 1) return;
+    var segStart = 0;
+    var curSt = DATA.timeline[0].fsm.state;
+    var segments = [];
+    for (var i = 1; i < T; i++) {
+      var st = DATA.timeline[i].fsm.state;
+      if (st !== curSt) {
+        segments.push({ state: curSt, from: segStart, to: i - 1 });
+        curSt = st;
+        segStart = i;
+      }
+    }
+    segments.push({ state: curSt, from: segStart, to: T - 1 });
+    segments.forEach(function (seg) {
+      var x0 = pad + (seg.from / Math.max(1, T - 1)) * innerW;
+      var x1 = pad + (seg.to / Math.max(1, T - 1)) * innerW;
+      ctx.fillStyle = FSM_COL[seg.state] || '#666';
+      ctx.fillRect(x0, y0, Math.max(2, x1 - x0 + 0.5), barH);
+    });
+    c._playhead = function (ix) {
+      var x = pad + (ix / Math.max(1, T - 1)) * innerW;
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(x, y0 - 4);
+      ctx.lineTo(x, y0 + barH + 4);
+      ctx.stroke();
+    };
+  }
+
+  function drawSpeedChart() {
+    var c = $('chart-speed');
+    var ctx = c.getContext('2d');
+    var w = c.width, h = c.height;
+    var pad = chartPadding();
+    ctx.fillStyle = '#1a1a2e';
+    ctx.fillRect(0, 0, w, h);
+    var innerW = w - pad.l - pad.r;
+    var innerH = h - pad.t - pad.b;
+    ctx.strokeStyle = '#ffeb3b';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    var T = DATA.timeline.length;
+    DATA.timeline.forEach(function (fr, i) {
+      var x = pad.l + (i / Math.max(1, T - 1)) * innerW;
+      var sc = fr.drone.speed_scale != null ? fr.drone.speed_scale : 1;
+      var y = pad.t + innerH * (1 - sc);
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+    c._playhead = function (ix) {
+      var x = pad.l + (ix / Math.max(1, T - 1)) * innerW;
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(x, pad.t);
+      ctx.lineTo(x, pad.t + innerH);
+      ctx.stroke();
+    };
+  }
+
+  function updateFrame() {
+    var fr = DATA.timeline[idx];
+    if (idx !== lastFlashIdx && fr.planner && fr.planner.replanned_this_step && fr.planner.path_before_replan && fr.planner.path_before_replan.length) {
+      flashPath = fr.planner.path_before_replan;
+      flashFrames = 20;
+      lastFlashIdx = idx;
+    }
+    drawMap();
+    drawStaticCharts();
+    ['chart-noise', 'chart-bat', 'chart-fsm', 'chart-speed'].forEach(function (id) {
+      var cv = $(id);
+      if (cv._playhead) cv._playhead(idx);
+    });
+    updateTelemetry();
+  }
+
+  $('pb-play').onclick = function () {
+    playing = !playing;
+    this.textContent = playing ? '❚❚ Pause' : '▶ Play';
+    lastFrame = performance.now();
+  };
+  $('pb-prev').onclick = function () { playing = false; $('pb-play').textContent = '▶ Play'; jumpTo(idx - 1); };
+  $('pb-next').onclick = function () { playing = false; $('pb-play').textContent = '▶ Play'; jumpTo(idx + 1); };
+  $('pb-start').onclick = function () { playing = false; $('pb-play').textContent = '▶ Play'; jumpTo(0); };
+  $('pb-end').onclick = function () { playing = false; $('pb-play').textContent = '▶ Play'; jumpTo(DATA.timeline.length - 1); };
+
+  $('scrub-bg').onclick = function (e) {
+    var rect = this.getBoundingClientRect();
+    var p = (e.clientX - rect.left) / rect.width;
+    jumpTo(Math.round(p * (DATA.timeline.length - 1)));
+  };
+
+  document.addEventListener('keydown', function (e) {
+    if (!$('app').classList.contains('visible') || !DATA) return;
+    if (e.code === 'Space') { e.preventDefault(); $('pb-play').click(); }
+    if (e.code === 'ArrowLeft') $('pb-prev').click();
+    if (e.code === 'ArrowRight') $('pb-next').click();
+  });
+
+  function tick(now) {
+    if (playing && DATA) {
+      var spd = parseFloat($('pb-speed').value) || 1;
+      acc += (now - lastFrame) * spd / 1000;
+      lastFrame = now;
+      while (acc >= 0.1 && playing) {
+        acc -= 0.1;
+        if (idx >= DATA.timeline.length - 1) {
+          playing = false;
+          $('pb-play').textContent = '▶ Play';
+          break;
+        }
+        idx++;
+      }
+    } else {
+      lastFrame = now;
+    }
+    if ($('app').classList.contains('visible') && DATA && (playing || flashFrames > 0)) {
+      updateFrame();
+    }
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+
+  // Drag-and-drop JSON on landing
+  document.body.addEventListener('dragover', function (e) { e.preventDefault(); });
+  document.body.addEventListener('drop', function (e) {
+    e.preventDefault();
+    var f = e.dataTransfer.files[0];
+    if (f && f.name.endsWith('.json')) loadFile(f);
+  });
+})();
+  </script>
+</body>
+</html>
