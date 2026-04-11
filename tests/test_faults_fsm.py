@@ -231,8 +231,8 @@ def test_integration_loop_150_steps_observes_faults(mission_config: dict) -> Non
     )
     assert r["final_timestep"] == 155
     assert len(r["fsm_transition_log"]) >= 1
-    # mission_01: sensor degradation scheduled at t=50 → FSM should log at least that transition.
-    assert any(e.get("timestep") == 50 for e in r["fsm_transition_log"])
+    # mission_01: sensor degradation scheduled at t=40 → FSM should log at least that transition.
+    assert any(e.get("timestep") == 40 for e in r["fsm_transition_log"])
 
 
 def test_fsm_replan_succeeded_nominal(mission_config: dict) -> None:
