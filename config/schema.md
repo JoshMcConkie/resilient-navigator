@@ -22,13 +22,13 @@ The simulator reads a single JSON file (default `config/mission_01.json`). All k
 | ------------------ | ------------ | ------------------------------------------------------------------------------------------------------- |
 | `grid_size`        | `[int, int]` | Grid width and height in cells; indices use `x` (column) ∈ `[0, width-1]`, `y` (row) ∈ `[0, height-1]`. |
 | `static_obstacles` | array        | Axis-aligned rectangles: `{ "x", "y", "width", "height" }` (integer cells, inclusive origin).           |
-| `dynamic_hazards`  | array        | Hazards applied when `trigger_timestep` is reached in `Environment.update`.                             |
+| `dynamic_hazards`  | array        | Hazard definitions (geometry only). Placement timing is driven by `fault_injection.schedule` (`environmental_hazard` entries), not by `Environment.update`. |
 
 
 ### Dynamic hazard entries
 
-- `**no_fly_zone**`: `id`, `type`, `trigger_timestep`, `position` `{x,y}`, `radius` (cells; filled disk on grid).
-- `**obstacle_spawn**`: `id`, `type`, `trigger_timestep`, `position` `{x,y}`, `width`, `height`.
+- `**no_fly_zone**`: `id`, `type`, `position` `{x,y}`, `radius` (cells; filled disk on grid).
+- `**obstacle_spawn**`: `id`, `type`, `position` `{x,y}`, `width`, `height`.
 
 Occupancy grid cell values: `0` free, `1` static/dynamic obstacle, `2` hazard (no-fly treated as hazard value).
 

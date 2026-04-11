@@ -22,6 +22,20 @@ def load_config(path: Path) -> dict[str, Any]:
         return json.load(f)
 
 
+def _print_segment_paths(config: dict[str, Any], environment: Environment, planner: DStarLitePlanner) -> None:
+    """Print D* full path for each waypoint-to-waypoint segment (initial map, no dynamic hazards)."""
+    wps = config["mission"]["waypoints"]
+    start = (int(config["drone"]["start_position"][0]), int(config["drone"]["start_position"][1]))
+    prev = start
+    print("Waypoint segment paths (D* Lite, static map only):")
+    for i, wp in enumerate(wps):
+        goal = (int(wp[0]), int(wp[1]))
+        path = planner.plan(prev, goal, environment)
+        print(f"  [{i}] {prev} -> {goal}  ({len(path)} cells)")
+        print(f"      {path}")
+        prev = goal
+
+
 def _make_planner(config: dict[str, Any]) -> DStarLitePlanner:
     primary = config["algorithm"]["primary_planner"]
     if primary == "d_star_lite":
@@ -43,6 +57,9 @@ def run_simulation(
     fault_injector = FaultInjector(config["fault_injection"])
     fault_detector = FaultDetector(config["algorithm"])
     fsm = AutonomyFSM(config["mission"], config["algorithm"])
+    if verbose:
+        _print_segment_paths(config, environment, _make_planner(config))
+
     planner = _make_planner(config)
 
     goal = mission_manager.get_current_target()
@@ -50,6 +67,7 @@ def run_simulation(
     last_goal: tuple[int, int] = goal
 
     timestep = 0
+    replan_events: list[dict[str, Any]] = []
     if verbose:
         print("Resilient Navigator — simulation with faults + FSM")
         print(f"Grid {environment.width}x{environment.height}, waypoints: {config['mission']['waypoints']}")
@@ -67,14 +85,33 @@ def run_simulation(
         fsm.update(timestep, fault_status, drone, mission_manager)
 
         if fsm.requires_replan:
+            path_before = list(planner.get_full_path())
             try:
                 planner.replan(drone.position, mission_manager.get_current_target(), environment)
                 path_ok = bool(planner.get_full_path())
+                path_after = list(planner.get_full_path())
+                # Re-evaluate faults after the map/path update so replan_succeeded uses current reality,
+                # not the pre-replan path_blocked status from this same timestep.
+                fault_status_after_replan = fault_detector.evaluate(drone, environment, planner)
+                replan_events.append(
+                    {
+                        "timestep": timestep,
+                        "path_before": path_before,
+                        "path_after": path_after,
+                    }
+                )
+                if verbose:
+                    print(f"\n*** REPLAN @ t={timestep} ***")
+                    print(f"    path_before ({len(path_before)}): {path_before}")
+                    print(f"    path_after  ({len(path_after)}): {path_after}")
                 if not path_ok:
                     fsm.replan_failed(drone, mission_manager)
                 else:
-                    fsm.replan_succeeded(fault_status, drone, mission_manager)
+                    fsm.replan_succeeded(fault_status_after_replan, drone, mission_manager)
             except Exception:
+                replan_events.append({"timestep": timestep, "path_before": path_before, "path_after": [], "error": True})
+                if verbose:
+                    print(f"\n*** REPLAN FAILED @ t={timestep} (exception) ***")
                 fsm.replan_failed(drone, mission_manager)
 
         if fsm.get_state() == "SAFE_MODE" and mission_manager.mission_status == "aborted":
@@ -118,10 +155,17 @@ def run_simulation(
     transition_log = fsm.get_transition_log()
     if verbose:
         print(f"\nFinished after timestep {timestep}.")
-        print("FSM transition log:")
+        print("FSM transition log (full):")
         for entry in transition_log:
             print(f"  {entry}")
-    return {"final_timestep": timestep, "fsm_transition_log": transition_log}
+        print("Replan events (path before / after):")
+        for ev in replan_events:
+            print(f"  {ev}")
+    return {
+        "final_timestep": timestep,
+        "fsm_transition_log": transition_log,
+        "replan_events": replan_events,
+    }
 
 
 def main() -> None:

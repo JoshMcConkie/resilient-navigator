@@ -99,8 +99,7 @@ def test_fault_injector_environmental_hazard_grid(mission_config: dict) -> None:
     for t in range(6):
         inj.update(t, drone, env)
         env.update(t)
-    x, y = 20, 15
-    assert env.is_blocked(x, y)
+    assert env.is_blocked(15, 15)
 
 
 def test_detector_nominal(mission_config: dict) -> None:

@@ -9,17 +9,15 @@
       {
         "id": "hazard_01",
         "type": "no_fly_zone",
-        "trigger_timestep": 50,
-        "position": {"x": 20, "y": 15},
-        "radius": 5
+        "position": {"x": 15, "y": 15},
+        "radius": 7
       },
       {
         "id": "hazard_02",
         "type": "obstacle_spawn",
-        "trigger_timestep": 100,
-        "position": {"x": 45, "y": 40},
-        "width": 3,
-        "height": 3
+        "position": {"x": 46, "y": 38},
+        "width": 14,
+        "height": 12
       }
     ]
   },
@@ -36,7 +34,9 @@
     "waypoints": [
       [10, 5],
       [25, 30],
+      [35, 15],
       [50, 50],
+      [60, 35],
       [70, 70]
     ],
     "priority_weights": {
@@ -57,17 +57,23 @@
   "fault_injection": {
     "schedule": [
       {
+        "timestep": 28,
+        "type": "environmental_hazard",
+        "hazard_id": "hazard_01",
+        "description": "No-fly zone on path toward waypoint [25,30] (triggers REPLANNING)"
+      },
+      {
         "timestep": 50,
         "type": "sensor_degradation",
         "severity": 0.4,
         "duration": 30,
-        "description": "GPS noise increases by 40%"
+        "description": "GPS noise +40% (DEGRADED; expires at t=80)"
       },
       {
-        "timestep": 120,
+        "timestep": 100,
         "type": "environmental_hazard",
-        "hazard_id": "hazard_01",
-        "description": "No-fly zone appears near waypoint 2"
+        "hazard_id": "hazard_02",
+        "description": "Obstacle field on path toward waypoint [60,35] (triggers REPLANNING)"
       }
     ]
   },

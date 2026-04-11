@@ -85,20 +85,13 @@ class Environment:
         return changed
 
     def update(self, timestep: int) -> None:
-        """Activate dynamic hazards whose trigger_timestep matches."""
+        """
+        Advance simulation time. Dynamic hazards are **not** applied here — they are
+        placed exactly once via :meth:`trigger_dynamic_hazard_by_id` (called from the
+        fault-injection schedule) so grid changes, change events, and active-fault
+        tracking stay synchronized.
+        """
         self._current_timestep = timestep
-        changed: list[tuple[int, int]] = []
-        for hz in self._dynamic_hazards:
-            hid = str(hz["id"])
-            if hid in self._triggered_ids:
-                continue
-            if int(hz["trigger_timestep"]) != timestep:
-                continue
-            self._triggered_ids.add(hid)
-            changed.extend(self._apply_dynamic_hazard(hz))
-
-        if changed:
-            self._change_events.append((timestep, changed))
 
     def trigger_dynamic_hazard_by_id(
         self,
