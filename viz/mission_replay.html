@@ -113,18 +113,19 @@
       display: flex; flex-wrap: wrap; flex: 1; gap: 0;
     }
     .map-col {
-      flex: 1 1 65%; min-width: 320px; padding: 0.75rem;
+      flex: 3 1 0; min-width: 0; padding: 0.75rem;
       display: flex; align-items: flex-start; justify-content: center;
       background: #0d0d20;
     }
     #map-wrap {
       position: relative; border: 1px solid var(--border); border-radius: 4px;
-      background: #1a1a2e; max-width: 100%;
+      background: #1a1a2e; width: 100%; max-width: 100%;
+      display: flex; justify-content: center; align-items: flex-start;
     }
-    #grid-canvas { display: block; vertical-align: top; }
+    #grid-canvas { display: block; vertical-align: top; flex-shrink: 0; }
 
     .telemetry-col {
-      flex: 1 1 320px; max-width: 480px; padding: 0.75rem;
+      flex: 0 0 300px; max-width: 320px; padding: 0.75rem;
       display: flex; flex-direction: column; gap: 0.75rem;
     }
     .panel {
@@ -1715,6 +1716,10 @@
         initApp();
         fillComparePanel();
         updateCompareBadge();
+        requestAnimationFrame(function () {
+          resizeCanvas();
+          updateFrame();
+        });
       } catch (err) {
         console.error(err);
         alert('Simulation error: ' + (err && err.message ? err.message : String(err)));
@@ -2008,11 +2013,20 @@
 
   function resizeCanvas() {
     var wrap = $('map-wrap');
+    var mapCol = wrap && wrap.parentElement;
     var gw = DATA.environment.grid_size[0];
     var gh = DATA.environment.grid_size[1];
-    var maxW = Math.min(wrap.clientWidth || 800, window.innerWidth * 0.62);
-    var maxH = window.innerHeight * 0.75;
-    var cs = Math.min(maxW / gw, maxH / gh, 14);
+    var maxW = 400;
+    if (mapCol) {
+      var st = getComputedStyle(mapCol);
+      var pl = parseFloat(st.paddingLeft) || 0;
+      var pr = parseFloat(st.paddingRight) || 0;
+      maxW = Math.max(0, mapCol.clientWidth - pl - pr);
+    }
+    var maxH = window.innerHeight * 0.65;
+    var raw = Math.min(maxW / gw, maxH / gh);
+    var cs = Math.floor(raw);
+    if (cs < 4) cs = 4;
     var dpr = window.devicePixelRatio || 1;
     var c = $('grid-canvas');
     c.width = Math.floor(gw * cs * dpr);
