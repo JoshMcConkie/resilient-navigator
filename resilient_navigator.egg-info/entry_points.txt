@@ -1,0 +1,2 @@
+[console_scripts]
+resilient-navigator = main:main

@@ -1,0 +1,30 @@
+Metadata-Version: 2.4
+Name: resilient-navigator
+Version: 0.1.0
+Summary: A modular, fault-tolerant autonomous drone mission simulator demonstrating dynamic replanning with D* Lite, FSM-based decision logic, and configurable fault injection.
+Author: Josh
+License: MIT
+Requires-Python: >=3.11
+Description-Content-Type: text/markdown
+Requires-Dist: numpy>=1.24.0
+Requires-Dist: matplotlib>=3.7.0
+Provides-Extra: dev
+Requires-Dist: pytest>=7.0.0; extra == "dev"
+Requires-Dist: pytest-cov>=4.0.0; extra == "dev"
+
+# Resilient Navigator
+
+Modular, JSON-driven 2D drone mission simulator. See `plan.md` for architecture and `config/schema.md` for configuration.
+
+## Setup
+
+```bash
+pip install -e ".[dev]"
+```
+
+## Run (Hour 1 stub)
+
+```bash
+python main.py
+python main.py --config path/to/mission.json
+```
