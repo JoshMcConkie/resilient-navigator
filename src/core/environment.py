@@ -122,20 +122,42 @@ class Environment:
             return True
         return False
 
-    def is_blocked(self, x: int, y: int) -> bool:
+    def is_blocked(
+        self,
+        x: int,
+        y: int,
+        *,
+        exempt: tuple[int, int] | None = None,
+        ignore_hazard_cells: bool = False,
+    ) -> bool:
+        """
+        Blocked if out of bounds, obstacle, or hazard (unless ``ignore_hazard_cells``).
+        If ``exempt`` is set, that cell is treated as traversable for planning queries only.
+        """
+        if exempt is not None and (int(x), int(y)) == (int(exempt[0]), int(exempt[1])):
+            return False
         if not self._in_bounds(x, y):
             return True
-        return int(self._grid[y, x]) != FREE
+        val = int(self._grid[y, x])
+        if ignore_hazard_cells:
+            return val == OBSTACLE
+        return val != FREE
 
-    def get_neighbors(self, x: int, y: int) -> List[Tuple[int, int]]:
-        """8-connected walkable neighbors (not blocked, in bounds)."""
+    def get_neighbors(
+        self,
+        x: int,
+        y: int,
+        *,
+        ignore_hazard_cells: bool = False,
+    ) -> List[Tuple[int, int]]:
+        """8-connected walkable neighbors (in bounds); hazards may be ignored for emergency egress."""
         out: list[tuple[int, int]] = []
         for dx in (-1, 0, 1):
             for dy in (-1, 0, 1):
                 if dx == 0 and dy == 0:
                     continue
                 nx, ny = x + dx, y + dy
-                if not self.is_blocked(nx, ny):
+                if not self.is_blocked(nx, ny, ignore_hazard_cells=ignore_hazard_cells):
                     out.append((nx, ny))
         return out
 

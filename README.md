@@ -2,16 +2,16 @@
 
 A modular, fault-tolerant autonomous drone mission simulator demonstrating dynamic replanning, FSM-based decision logic, and configurable fault injection.
 
-The project models a 2D grid world with static obstacles and scheduled dynamic hazards. A drone follows JSON-defined waypoints while a fault injector perturbs sensors and the map; a detector classifies conditions, and a finite-state machine chooses when to replan, slow down, return home, or abort. Two swappable planners—**D\* Lite** (incremental) and **A\*** (full recomputation)—implement the same octile movement costs, so you can compare incremental repair against a classical baseline.
+The project models a 2D grid world with static obstacles and scheduled dynamic hazards. A drone follows JSON-defined waypoints while a fault injector perturbs sensors and the map; a detector classifies conditions, and a finite-state machine chooses when to replan, slow down, return home, or abort. Two swappable planners—**D\* Lite** (incremental) and **A\*** (full recomputation)—share the same octile movement costs, so you can compare incremental repair against a classical baseline.
 
-The codebase is intentionally layered (environment, sensing, planning, faults, decision, visualization) with strict typing and tests, suitable as a teaching or research scaffold for resilient autonomy.
+The codebase is layered (environment, sensing, planning, faults, decision, visualization) with strict typing and tests, suitable as a teaching or research scaffold for resilient autonomy.
 
 ## Architecture
 
 ```
 ┌─────────────────────────────────────────────────┐
 │ main.py                                         │
-│ (11-step sim loop)                              │
+│ (simulation loop)                               │
 ├──────┬──────┬──────┬──────┬──────┬──────────────┤
 │ Env  │Drone │Mission│Fault │Fault │ Autonomy   │
 │      │      │Mgr    │Inject│Detect│ FSM        │
@@ -19,8 +19,9 @@ The codebase is intentionally layered (environment, sensing, planning, faults, d
 │                    │ Planners (swappable)       │
 │                    ├─────────────┬──────────────┤
 │                    │ D* Lite     │ A*           │
-├────────────────────┴─────────────┴────────────┤
-│ Dashboard (Matplotlib)                          │
+├────────────────────┴─────────────┴──────────────┤
+│ Live dashboard (Matplotlib)  │  HTML replay    │
+│ (optional)                   │  (viz/, browser)│
 └─────────────────────────────────────────────────┘
 ```
 
@@ -28,13 +29,14 @@ The codebase is intentionally layered (environment, sensing, planning, faults, d
 
 - **JSON-driven missions**: grid size, obstacles, dynamic hazards, waypoints, home, algorithm thresholds, fault schedules, and visualization options in one file.
 - **D\* Lite** incremental replanning after map changes (Koenig & Likhachev, 2002).
-- **A\*** fallback with full replan each time (`replan` calls `plan`).
+- **A\*** with full replan each time (`replan` calls `plan`).
 - **Fault injection**: sensor degradation and environmental hazards on a timestep schedule.
 - **Fault detection**: WARNING / CRITICAL levels and path–obstacle consistency checks.
 - **FSM**: NOMINAL, DEGRADED, REPLANNING, SAFE_MODE, ABORT with a full transition log.
 - **Live dashboard**: map, trail, planned path, sensor disk, and telemetry (optional via `--no-viz`).
+- **HTML mission replay** (`viz/mission_replay.html`): self-contained browser dashboard with optional in-browser simulation (no Python required for demos), six embedded mission presets, and side-by-side D\* Lite vs A\* comparison when both runs are cached.
 
-## Quick Start
+## Quick start
 
 ```bash
 git clone <repository-url>
@@ -44,7 +46,13 @@ source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -e ".[dev]"
 ```
 
-Run the default mission:
+Using [uv](https://github.com/astral-sh/uv) (optional):
+
+```bash
+uv sync --all-extras
+```
+
+Run the default mission (`config/mission_01.json`):
 
 ```bash
 PYTHONPATH=. python main.py --max-steps 200
@@ -56,10 +64,37 @@ Headless / CI (no Matplotlib window):
 PYTHONPATH=. python main.py --max-steps 160 --no-viz
 ```
 
-Export a full mission history as JSON (no Matplotlib), then open `viz/mission_replay.html` in a browser and load the file for an HTML replay:
+## Mission replay dashboard (HTML)
+
+Open **`viz/mission_replay.html`** in a modern browser (double-click or “Open file”). Everything is self-contained in that file; no build step.
+
+| Mode | What it does |
+| ------ | -------------- |
+| **Easy Open** | Pick one of **six embedded presets** (same JSON as under `config/`). Runs **D\* Lite** and **A\*** in the browser and caches both; switch algorithms instantly from the title bar. |
+| **Load exported JSON** | Load a file produced by **`python main.py --export-json …`** for a single recorded run (the planner matches that export). |
+| **Load custom config** | Load any mission JSON matching the schema; both planners are simulated in-browser; you can switch between D\* Lite and A\*. |
+
+Export from Python for a faithful recording of the simulator (then load it in the HTML file picker):
 
 ```bash
 PYTHONPATH=. python main.py --export-json output/sim_run.json --max-steps 160 --run-full-horizon
+```
+
+Bundled example missions (also embedded in the HTML presets):
+
+| File | Theme |
+| ------ | ------ |
+| `config/mission_01.json` | Balanced baseline — replanning and sensor degradation |
+| `config/mission_02_gauntlet.json` | Dense obstacles and narrow corridors |
+| `config/mission_03_sensor_blackout.json` | Escalating sensor faults toward SAFE_MODE |
+| `config/mission_04_battery_race.json` | Long route, tight battery (100×100 grid) |
+| `config/mission_05_cascade_failure.json` | Rapid, overlapping faults |
+| `config/mission_06_return_to_base.json` | Abort-to-home through hazards |
+
+To drive the **Python** simulator with a specific file:
+
+```bash
+PYTHONPATH=. python main.py --config config/mission_04_battery_race.json --max-steps 400 --no-viz
 ```
 
 Use **A\*** as the primary planner by setting `"primary_planner": "a_star"` under `algorithm` in your mission JSON (same schema as D\* Lite).
@@ -70,7 +105,7 @@ The simulator reads a single JSON file (default `config/mission_01.json`). Top-l
 
 | Section | Purpose |
 | -------- | -------- |
-| `environment` | `grid_size`, `static_obstacles`, `dynamic_hazards` (definitions only; activation times come from fault schedule) |
+| `environment` | `grid_size`, `static_obstacles`, `dynamic_hazards` (definitions; activation times come from the fault schedule) |
 | `drone` | Start pose, speed, sensor range, noise limits, battery |
 | `mission` | `waypoints`, `home_position`, optional `waypoint_tolerance`, `priority_weights` |
 | `algorithm` | `primary_planner` (`d_star_lite` or `a_star`), sensor thresholds, replan settings |
@@ -89,7 +124,7 @@ The simulator reads a single JSON file (default `config/mission_01.json`). Top-l
 
 Full field descriptions: **`config/schema.md`**.
 
-## How It Works
+## How it works
 
 Each timestep:
 
@@ -117,7 +152,7 @@ Both use an **8-connected** grid: cardinal step cost `1`, diagonal `√2`, with 
 
 A\* trades CPU for simplicity: every replan rebuilds the open set from scratch, which is easier to audit than incremental repair.
 
-## FSM States
+## FSM states
 
 | State | Meaning |
 | ------- | -------- |
@@ -129,10 +164,16 @@ A\* trades CPU for simplicity: every replan rebuilds the open set from scratch, 
 
 Typical transitions: WARNING → DEGRADED; path blocked → REPLANNING; successful replan → NOMINAL or DEGRADED depending on fault level; failed replan → SAFE_MODE; low battery → ABORT.
 
-## Running Tests
+## Running tests
 
 ```bash
 PYTHONPATH=. python -m pytest tests/ -v
+```
+
+With uv:
+
+```bash
+uv run pytest tests/ -v
 ```
 
 ## References

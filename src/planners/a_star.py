@@ -20,11 +20,20 @@ def _h(a: Tuple[int, int], b: Tuple[int, int]) -> float:
     return float(math.hypot(a[0] - b[0], a[1] - b[1]))
 
 
-def _edge_cost(u: Tuple[int, int], v: Tuple[int, int], environment: Environment) -> float:
+def _edge_cost_astar(
+    u: Tuple[int, int],
+    v: Tuple[int, int],
+    environment: Environment,
+    exempt: Tuple[int, int] | None,
+    *,
+    ignore_hazard_cells: bool = False,
+) -> float:
     """Cost of traversing edge u -> v (8-connected); matches D* Lite."""
     ux, uy = u
     vx, vy = v
-    if environment.is_blocked(vx, vy) or environment.is_blocked(ux, uy):
+    if environment.is_blocked(vx, vy, exempt=exempt, ignore_hazard_cells=ignore_hazard_cells) or environment.is_blocked(
+        ux, uy, exempt=exempt, ignore_hazard_cells=ignore_hazard_cells
+    ):
         return float("inf")
     if abs(ux - vx) + abs(uy - vy) == 1:
         return 1.0
@@ -40,6 +49,8 @@ class AStarPlanner(BasePlanner):
         self._env: Environment | None = None
         self._goal: Tuple[int, int] = (0, 0)
         self._path: List[Tuple[int, int]] = []
+        self._exempt_cell: Tuple[int, int] | None = None
+        self._ignore_hazard_cells: bool = False
 
     def get_name(self) -> str:
         return "a_star"
@@ -49,15 +60,27 @@ class AStarPlanner(BasePlanner):
         start: Tuple[int, int],
         goal: Tuple[int, int],
         environment: Environment,
+        *,
+        exempt_start: bool = False,
     ) -> List[Tuple[int, int]]:
         """Compute a shortest path with A*; return ``[]`` if no path exists."""
+        self._exempt_cell = None
+        self._ignore_hazard_cells = False
         sx, sy = int(start[0]), int(start[1])
         gx, gy = int(goal[0]), int(goal[1])
-        if environment.is_blocked(sx, sy) or environment.is_blocked(gx, gy):
-            raise ValueError("start and goal must lie on free cells")
+        if not exempt_start:
+            if environment.is_blocked(sx, sy) or environment.is_blocked(gx, gy):
+                raise ValueError("start and goal must lie on free cells")
+        else:
+            if environment.is_blocked(gx, gy):
+                raise ValueError("goal must lie on a free cell")
+            self._exempt_cell = (sx, sy)
+            self._ignore_hazard_cells = True
 
         self._env = environment
         self._goal = (gx, gy)
+        ex = self._exempt_cell
+        ign = self._ignore_hazard_cells
 
         start_c = (sx, sy)
         goal_c = (gx, gy)
@@ -87,8 +110,8 @@ class AStarPlanner(BasePlanner):
                 self._path = self._reconstruct(came_from, u, start_c)
                 return list(self._path)
 
-            for v in environment.get_neighbors(u[0], u[1]):
-                c = _edge_cost(u, v, environment)
+            for v in environment.get_neighbors(u[0], u[1], ignore_hazard_cells=ign):
+                c = _edge_cost_astar(u, v, environment, ex, ignore_hazard_cells=ign)
                 if math.isinf(c):
                     continue
                 tentative = g_u + c
@@ -130,9 +153,11 @@ class AStarPlanner(BasePlanner):
         current_position: Tuple[int, int],
         goal: Tuple[int, int],
         environment: Environment,
+        *,
+        exempt_start: bool = False,
     ) -> None:
         """Full recomputation (no incremental repair)."""
-        self.plan(current_position, goal, environment)
+        self.plan(current_position, goal, environment, exempt_start=exempt_start)
 
     def get_next_step(self, current_position: Tuple[int, int]) -> Tuple[int, int]:
         """Return the next cell along the stored path toward the goal."""

@@ -37,6 +37,7 @@ class AutonomyFSM:
 
         self._state = FSMState.NOMINAL
         self.requires_replan: bool = False
+        self.emergency_escape: bool = False
         self._transition_log: list[dict[str, Any]] = []
         self._prev_noise: float | None = None
         self._last_timestep: int = 0
@@ -88,12 +89,27 @@ class AutonomyFSM:
         self._last_timestep = timestep
         prev = self._state
 
+        if self._state == FSMState.ABORT:
+            self._prev_noise = float(drone.sensor_noise_level)
+            return
+
+        if fault_status.type == "position_trapped":
+            self._transition(timestep, prev, FSMState.ABORT, "position_trapped", drone, mission_manager)
+            self.requires_replan = False
+            self.emergency_escape = False
+            self._prev_noise = float(drone.sensor_noise_level)
+            return
+
         if self._battery_low(drone):
             self._transition(timestep, prev, FSMState.ABORT, "battery_below_5pct", drone, mission_manager)
             self._prev_noise = float(drone.sensor_noise_level)
             return
 
-        if self._state == FSMState.ABORT:
+        if fault_status.type == "position_compromised":
+            if self._state != FSMState.REPLANNING:
+                self._transition(timestep, prev, FSMState.REPLANNING, "emergency_escape", drone, mission_manager)
+            self.requires_replan = True
+            self.emergency_escape = True
             self._prev_noise = float(drone.sensor_noise_level)
             return
 
@@ -167,7 +183,7 @@ class AutonomyFSM:
         mission_manager: MissionManager,
         prev: FSMState,
     ) -> None:
-        if fs.level == "CRITICAL":
+        if fs.level == "CRITICAL" and fs.type != "position_compromised":
             self._transition(timestep, prev, FSMState.SAFE_MODE, "critical_while_replanning", drone, mission_manager)
 
     def _from_safe_mode(
@@ -191,7 +207,7 @@ class AutonomyFSM:
             return
         prev = self._state
         ts = self._last_timestep
-        if fault_status.level == "CRITICAL":
+        if fault_status.level == "CRITICAL" and fault_status.type != "position_compromised":
             self._transition(ts, prev, FSMState.SAFE_MODE, "replan_done_critical_fault", drone, mission_manager)
         elif fault_status.level == "WARNING":
             self._transition(ts, prev, FSMState.DEGRADED, "replan_succeeded_warning", drone, mission_manager)

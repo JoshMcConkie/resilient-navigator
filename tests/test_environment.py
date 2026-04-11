@@ -49,6 +49,21 @@ def test_get_neighbors_walkable_eight_connected() -> None:
     assert (5, 6) in n and (6, 6) in n
 
 
+def test_ignore_hazard_cells_allows_egress_neighbors() -> None:
+    """Emergency planning treats hazards as traversable; obstacles still block."""
+    cfg = _base_cfg()
+    cfg["environment"]["dynamic_hazards"] = [
+        {"id": "nfz", "type": "no_fly_zone", "position": {"x": 10, "y": 10}, "radius": 2}
+    ]
+    env = Environment(cfg)
+    env.trigger_dynamic_hazard_by_id("nfz", event_timestep=0)
+    assert env.is_blocked(10, 10)
+    assert not env.get_neighbors(10, 10)
+    n_esc = env.get_neighbors(10, 10, ignore_hazard_cells=True)
+    assert len(n_esc) == 8
+    assert not env.is_blocked(10, 11, ignore_hazard_cells=True)
+
+
 def test_dynamic_hazard_trigger_timestep_and_changes() -> None:
     cfg = _base_cfg()
     cfg["environment"]["dynamic_hazards"] = [

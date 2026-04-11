@@ -69,13 +69,7 @@
         "hazard_id": "hazard_01",
         "description": "No-fly zone on path toward waypoint [25,30] (triggers REPLANNING)"
       },
-      {
-        "timestep": 40,
-        "type": "sensor_degradation",
-        "severity": 0.4,
-        "duration": 30,
-        "description": "GPS noise +40% (DEGRADED; expires at t=80)"
-      },
+     
       {
         "timestep": 62,
         "type": "environmental_hazard",

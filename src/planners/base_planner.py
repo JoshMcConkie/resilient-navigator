@@ -17,6 +17,8 @@ class BasePlanner(ABC):
         start: Tuple[int, int],
         goal: Tuple[int, int],
         environment: Environment,
+        *,
+        exempt_start: bool = False,
     ) -> List[Tuple[int, int]]:
         """Compute a full path from start to goal."""
 
@@ -26,6 +28,8 @@ class BasePlanner(ABC):
         current_position: Tuple[int, int],
         goal: Tuple[int, int],
         environment: Environment,
+        *,
+        exempt_start: bool = False,
     ) -> None:
         """Recompute the path after the robot moves and/or the map changes."""
 

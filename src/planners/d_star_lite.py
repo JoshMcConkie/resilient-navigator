@@ -57,6 +57,8 @@ class DStarLitePlanner(BasePlanner):
         self._last_processed_timestep = -1
         self._path: List[Tuple[int, int]] = []
         self._full_initialize_calls = 0
+        self._exempt_cell: Tuple[int, int] | None = None
+        self._ignore_hazard_cells: bool = False
 
     @property
     def full_initialize_calls(self) -> int:
@@ -100,7 +102,11 @@ class DStarLitePlanner(BasePlanner):
         assert self._env is not None
         ux, uy = u
         vx, vy = v
-        if self._env.is_blocked(vx, vy) or self._env.is_blocked(ux, uy):
+        ex = self._exempt_cell
+        ign = self._ignore_hazard_cells
+        if self._env.is_blocked(vx, vy, exempt=ex, ignore_hazard_cells=ign) or self._env.is_blocked(
+            ux, uy, exempt=ex, ignore_hazard_cells=ign
+        ):
             return float("inf")
         if abs(ux - vx) + abs(uy - vy) == 1:
             return 1.0
@@ -111,7 +117,9 @@ class DStarLitePlanner(BasePlanner):
     def _succ(self, u: Tuple[int, int]) -> List[Tuple[int, int]]:
         """Succ(u): valid moves from u toward the goal (paper Figure 3)."""
         assert self._env is not None
-        return list(self._env.get_neighbors(u[0], u[1]))
+        return list(
+            self._env.get_neighbors(u[0], u[1], ignore_hazard_cells=self._ignore_hazard_cells)
+        )
 
     def _pred(self, u: Tuple[int, int]) -> List[Tuple[int, int]]:
         """Pred(u): all vertices that have an edge into u (8-neighborhood on grid)."""
@@ -232,12 +240,24 @@ class DStarLitePlanner(BasePlanner):
         start: Tuple[int, int],
         goal: Tuple[int, int],
         environment: Environment,
+        *,
+        exempt_start: bool = False,
     ) -> List[Tuple[int, int]]:
-        if environment.is_blocked(start[0], start[1]) or environment.is_blocked(goal[0], goal[1]):
-            raise ValueError("start and goal must lie on free cells")
+        self._exempt_cell = None
+        self._ignore_hazard_cells = False
+        sx, sy = int(start[0]), int(start[1])
+        gx, gy = int(goal[0]), int(goal[1])
+        if not exempt_start:
+            if environment.is_blocked(sx, sy) or environment.is_blocked(gx, gy):
+                raise ValueError("start and goal must lie on free cells")
+        else:
+            if environment.is_blocked(gx, gy):
+                raise ValueError("goal must lie on a free cell")
+            self._exempt_cell = (sx, sy)
+            self._ignore_hazard_cells = True
         self._env = environment
-        self._s_start = (int(start[0]), int(start[1]))
-        self._s_goal = (int(goal[0]), int(goal[1]))
+        self._s_start = (sx, sy)
+        self._s_goal = (gx, gy)
         self._s_last = self._s_start
         self._km = 0.0
         self._initialize()
@@ -251,6 +271,8 @@ class DStarLitePlanner(BasePlanner):
         current_position: Tuple[int, int],
         goal: Tuple[int, int],
         environment: Environment,
+        *,
+        exempt_start: bool = False,
     ) -> None:
         """
         Incremental replan: update ``km`` when the start moves, apply
@@ -258,16 +280,23 @@ class DStarLitePlanner(BasePlanner):
         then :meth:`compute_shortest_path`. Does **not** reset ``g``/``rhs``.
         """
         if (int(goal[0]), int(goal[1])) != self._s_goal:
-            self.plan(current_position, goal, environment)
+            self.plan(current_position, goal, environment, exempt_start=exempt_start)
             return
 
-        self._env = environment
-        if environment.is_blocked(current_position[0], current_position[1]) or environment.is_blocked(
-            goal[0], goal[1]
-        ):
-            raise ValueError("current position and goal must lie on free cells")
-
+        self._exempt_cell = None
+        self._ignore_hazard_cells = False
+        gx, gy = int(goal[0]), int(goal[1])
         cur = (int(current_position[0]), int(current_position[1]))
+        if not exempt_start:
+            if environment.is_blocked(cur[0], cur[1]) or environment.is_blocked(gx, gy):
+                raise ValueError("current position and goal must lie on free cells")
+        else:
+            if environment.is_blocked(gx, gy):
+                raise ValueError("goal must lie on a free cell")
+            self._exempt_cell = cur
+            self._ignore_hazard_cells = True
+
+        self._env = environment
         if cur != self._s_last:
             self._km += _h(self._s_last, cur)
             self._s_last = cur

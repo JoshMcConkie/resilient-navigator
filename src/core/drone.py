@@ -27,6 +27,7 @@ class Drone:
         self.battery: float = float(d["battery_capacity"])
         self.sensor_noise_level: float = float(d["sensor_noise_baseline"])
         self.sensor_range: int = int(d["sensor_range"])
+        self._sensor_range: int = int(d["sensor_range"])
         self.heading: float = 0.0
         self._speed: float = float(d["speed"])
         self._battery_capacity: float = float(d["battery_capacity"])
@@ -39,11 +40,36 @@ class Drone:
         # Caution / FSM: scales battery drain per move (1.0 = nominal).
         self._speed_scale: float = 1.0
 
+    def get_effective_sensor_range(self) -> float:
+        """Range shrinks as noise approaches max (dashboard + sense visibility)."""
+        noise_ratio = self.sensor_noise_level / max(self._max_sensor_noise, 1e-9)
+        return float(self._sensor_range) * (1.0 - 0.5 * min(1.0, noise_ratio))
+
+    def get_position_estimate(self, environment: Environment) -> tuple[int, int]:
+        """Noisy grid position for planning; clamped and snapped to a free cell."""
+        noise_x = int(round(float(np.random.normal(0.0, self.sensor_noise_level * 5.0))))
+        noise_y = int(round(float(np.random.normal(0.0, self.sensor_noise_level * 5.0))))
+        px, py = int(self.position[0]), int(self.position[1])
+        gw, gh = environment.width, environment.height
+        est_x = max(0, min(gw - 1, px + noise_x))
+        est_y = max(0, min(gh - 1, py + noise_y))
+        if not environment.is_blocked(est_x, est_y):
+            return (est_x, est_y)
+        for rad in range(1, max(gw, gh)):
+            for dx in range(-rad, rad + 1):
+                for dy in range(-rad, rad + 1):
+                    if max(abs(dx), abs(dy)) != rad:
+                        continue
+                    nx, ny = est_x + dx, est_y + dy
+                    if 0 <= nx < gw and 0 <= ny < gh and not environment.is_blocked(nx, ny):
+                        return (nx, ny)
+        return (px, py)
+
     def sense(self, environment: Environment) -> dict[str, Any]:
-        """Local observation within sensor_range, corrupted by sensor_noise_level."""
+        """Local observation within effective sensor range, corrupted by sensor_noise_level."""
         x, y = self.position
         obs_cells: list[tuple[int, int]] = []
-        r = float(self.sensor_range)
+        r = float(self.get_effective_sensor_range())
         r_int = int(math.ceil(r))
         grid = environment.get_grid()
         for cx in range(x - r_int, x + r_int + 1):
@@ -63,6 +89,7 @@ class Drone:
         return {
             "observed_obstacles": obs_cells,
             "position_estimate": position_estimate,
+            "effective_sensor_range": r,
         }
 
     def move(self, target_cell: tuple[int, int]) -> None:
@@ -72,6 +99,13 @@ class Drone:
         if (x, y) == (tx, ty):
             self.velocity = (0.0, 0.0)
             return
+
+        if self._speed_scale < 1.0:
+            if float(np.random.random()) > self._speed_scale:
+                self.velocity = (0.0, 0.0)
+                idle = self._battery_drain_rate * self._speed_scale * 0.5
+                self.battery = max(0.0, self.battery - idle)
+                return
 
         best: tuple[int, int] | None = None
         best_d = math.inf

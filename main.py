@@ -53,6 +53,28 @@ def _make_planner(config: dict[str, Any]) -> BasePlanner:
     raise NotImplementedError(f"Planner not implemented: {primary}")
 
 
+def _safe_plan(
+    planner: BasePlanner,
+    config: dict[str, Any],
+    start: tuple[int, int],
+    goal: tuple[int, int],
+    environment: Environment,
+) -> BasePlanner:
+    """Like JS ``safePlan``: avoid crashing when start or goal is blocked (e.g. after hazard spawn)."""
+    sx, sy = int(start[0]), int(start[1])
+    exempt_start = environment.is_blocked(sx, sy)
+    try:
+        planner.plan(start, goal, environment, exempt_start=exempt_start)
+        return planner
+    except Exception:
+        p2 = _make_planner(config)
+        try:
+            p2.plan(start, goal, environment, exempt_start=exempt_start)
+            return p2
+        except Exception:
+            return _make_planner(config)
+
+
 def _faults_payload_for_export(active: list[dict[str, Any]], step_events: list[dict[str, Any]]) -> dict[str, Any]:
     """Shape `faults` block for one timeline frame."""
     injected: dict[str, Any] | None = None
@@ -78,6 +100,13 @@ def _fsm_transition_for_timeline(new_entries: list[dict[str, Any]]) -> dict[str,
         return None
     e = new_entries[-1]
     return {"from": e["from_state"], "to": e["to_state"], "trigger": e["trigger"]}
+
+
+def _planning_position(drone: Drone, environment: Environment, fsm: AutonomyFSM) -> tuple[int, int]:
+    """Position passed to the planner: noisy when FSM indicates degraded sensing."""
+    if fsm.get_state() in ("DEGRADED", "REPLANNING", "SAFE_MODE"):
+        return drone.get_position_estimate(environment)
+    return (int(drone.position[0]), int(drone.position[1]))
 
 
 def _skip_blocked_waypoints(
@@ -131,7 +160,7 @@ def run_simulation(
     if verbose:
         _print_segment_paths(config, environment, planner)
     goal = mission_manager.get_current_target()
-    planner.plan(drone.position, goal, environment)
+    planner = _safe_plan(planner, config, (int(drone.position[0]), int(drone.position[1])), goal, environment)
     last_goal: tuple[int, int] = goal
 
     timestep = 0
@@ -156,10 +185,17 @@ def run_simulation(
 
         if mission_manager.get_current_target() != last_goal:
             last_goal = mission_manager.get_current_target()
-            planner.plan(drone.position, last_goal, environment)
+            planner = _safe_plan(
+                planner,
+                config,
+                _planning_position(drone, environment, fsm),
+                last_goal,
+                environment,
+            )
 
         fault_status = fault_detector.evaluate(drone, environment, planner)
         fsm.update(timestep, fault_status, drone, mission_manager)
+        planning_pos = _planning_position(drone, environment, fsm)
 
         replanned_this_step = False
         path_before_replan: list[tuple[int, int]] | None = None
@@ -167,8 +203,14 @@ def run_simulation(
             path_before = list(planner.get_full_path())
             path_before_replan = path_before
             replanned_this_step = True
+            exempt_start = fsm.emergency_escape
             try:
-                planner.replan(drone.position, mission_manager.get_current_target(), environment)
+                planner.replan(
+                    planning_pos,
+                    mission_manager.get_current_target(),
+                    environment,
+                    exempt_start=exempt_start,
+                )
                 path_ok = bool(planner.get_full_path())
                 path_after = list(planner.get_full_path())
                 # Re-evaluate faults after the map/path update so replan_succeeded uses current reality,
@@ -194,20 +236,41 @@ def run_simulation(
                 if verbose:
                     print(f"\n*** REPLAN FAILED @ t={timestep} (exception) ***")
                 fsm.replan_failed(drone, mission_manager)
+            finally:
+                fsm.emergency_escape = False
 
-        if fsm.get_state() == "SAFE_MODE" and mission_manager.mission_status == "aborted":
+        elif fsm.get_state() in ("DEGRADED", "REPLANNING", "SAFE_MODE"):
+            # Keep planner aligned with noisy planning pose (not only on requires_replan).
             try:
-                planner.replan(drone.position, mission_manager.get_current_target(), environment)
+                px_, py_ = planning_pos[0], planning_pos[1]
+                planner.replan(
+                    planning_pos,
+                    mission_manager.get_current_target(),
+                    environment,
+                    exempt_start=environment.is_blocked(px_, py_),
+                )
             except Exception:
                 pass
+
+        if fsm.get_state() == "SAFE_MODE" and mission_manager.mission_status == "aborted":
             fsm.check_safe_mode_abort(timestep, drone, mission_manager, planner)
 
         try:
-            next_move = planner.get_next_step(drone.position)
+            next_move = planner.get_next_step(planning_pos)
         except RuntimeError:
-            if fsm.get_state() == "REPLANNING":
-                fsm.replan_failed(drone, mission_manager)
-            next_move = drone.position
+            px, py = int(drone.position[0]), int(drone.position[1])
+            if environment.is_blocked(px, py):
+                neighbors = environment.get_neighbors(px, py)
+                if not neighbors:
+                    neighbors = environment.get_neighbors(px, py, ignore_hazard_cells=True)
+                if neighbors:
+                    next_move = neighbors[0]
+                else:
+                    next_move = drone.position
+            else:
+                if fsm.get_state() == "REPLANNING":
+                    fsm.replan_failed(drone, mission_manager)
+                next_move = drone.position
 
         drone.move(next_move)
         mission_manager.update(drone.position)
@@ -218,11 +281,14 @@ def run_simulation(
             new_fsm = log_full[fsm_log_cursor:]
             fsm_log_cursor = len(log_full)
             wp = mission_manager.get_progress()
-            pos_est = sense_data.get("position_estimate", (float(drone.position[0]), float(drone.position[1])))
-            if isinstance(pos_est, tuple):
-                pe = [float(pos_est[0]), float(pos_est[1])]
+            if fsm.get_state() in ("DEGRADED", "REPLANNING", "SAFE_MODE"):
+                pe = [float(planning_pos[0]), float(planning_pos[1])]
             else:
-                pe = [float(pos_est[0]), float(pos_est[1])]
+                pos_est = sense_data.get("position_estimate", (float(drone.position[0]), float(drone.position[1])))
+                if isinstance(pos_est, tuple):
+                    pe = [float(pos_est[0]), float(pos_est[1])]
+                else:
+                    pe = [float(pos_est[0]), float(pos_est[1])]
             planned = [[int(p[0]), int(p[1])] for p in planner.get_full_path()]
             timeline.append(
                 {
@@ -230,6 +296,7 @@ def run_simulation(
                     "drone": {
                         "position": [int(drone.position[0]), int(drone.position[1])],
                         "position_estimate": pe,
+                        "planning_position": [int(planning_pos[0]), int(planning_pos[1])],
                         "heading": float(drone.heading),
                         "battery": float(drone.battery),
                         "battery_pct": round(100.0 * float(drone.battery) / bat_cap, 4) if bat_cap > 0 else 0.0,
@@ -267,6 +334,7 @@ def run_simulation(
             mission_manager,
             timestep,
             fault_injector=fault_injector,
+            planning_position=planning_pos,
         )
         if dashboard.is_closed:
             dashboard_closed = True

@@ -1,0 +1,57 @@
+{
+  "environment": {
+    "grid_size": [30, 30],
+    "static_obstacles": [],
+    "dynamic_hazards": [
+      {
+        "id": "hazard_emergency_on_drone",
+        "type": "no_fly_zone",
+        "position": { "x": 15, "y": 12 },
+        "radius": 0
+      }
+    ]
+  },
+  "drone": {
+    "start_position": [5, 12],
+    "speed": 1.0,
+    "sensor_range": 10,
+    "sensor_noise_baseline": 0.05,
+    "max_sensor_noise": 0.5,
+    "battery_capacity": 1000,
+    "battery_drain_rate": 1.0
+  },
+  "mission": {
+    "waypoints": [[22, 12]],
+    "priority_weights": {
+      "mission_completion": 0.6,
+      "safety": 0.3,
+      "energy_conservation": 0.1
+    },
+    "home_position": [0, 0]
+  },
+  "algorithm": {
+    "primary_planner": "d_star_lite",
+    "secondary_planner": "a_star",
+    "replanning_trigger": "on_fault_or_hazard",
+    "replan_cooldown_steps": 0,
+    "sensor_degradation_threshold": 0.3,
+    "critical_fault_threshold": 0.7
+  },
+  "fault_injection": {
+    "schedule": [
+      {
+        "timestep": 10,
+        "type": "environmental_hazard",
+        "hazard_id": "hazard_emergency_on_drone",
+        "description": "No-fly spawns on drone cell — emergency escape"
+      }
+    ]
+  },
+  "visualization": {
+    "fps": 10,
+    "trail_length": 50,
+    "show_sensor_range": true,
+    "show_planned_path": true,
+    "dashboard_enabled": false
+  }
+}

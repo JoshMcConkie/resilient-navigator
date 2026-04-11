@@ -10,7 +10,14 @@ from src.core.environment import Environment
 from src.planners.base_planner import BasePlanner
 
 FaultLevel = Literal["NOMINAL", "WARNING", "CRITICAL"]
-FaultType = Literal["none", "sensor_degradation", "path_blocked", "combined"]
+FaultType = Literal[
+    "none",
+    "sensor_degradation",
+    "path_blocked",
+    "combined",
+    "position_compromised",
+    "position_trapped",
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,8 +46,35 @@ class FaultDetector:
         planner: BasePlanner,
     ) -> FaultStatus:
         """Produce a :class:`FaultStatus` for the current timestep."""
+        px, py = int(drone.position[0]), int(drone.position[1])
+        if environment.is_blocked(px, py):
+            nbs_egress = environment.get_neighbors(px, py, ignore_hazard_cells=True)
+            if not nbs_egress:
+                return FaultStatus(
+                    level="CRITICAL",
+                    type="position_trapped",
+                    details="Drone surrounded by hard obstacles — no escape.",
+                )
+            path = planner.get_full_path()
+            escape_planned = False
+            if len(path) >= 2:
+                n0 = (int(path[0][0]), int(path[0][1]))
+                n1 = (int(path[1][0]), int(path[1][1]))
+                if (
+                    n0 == (px, py)
+                    and n1 in nbs_egress
+                    and not environment.is_blocked(n1[0], n1[1], ignore_hazard_cells=True)
+                ):
+                    escape_planned = True
+            if not escape_planned:
+                return FaultStatus(
+                    level="CRITICAL",
+                    type="position_compromised",
+                    details="Drone is inside a blocked/hazard cell — emergency escape required.",
+                )
+
         noise = float(drone.sensor_noise_level)
-        path_blocked = self._planned_path_intersects_blocked(environment, planner)
+        path_blocked = self._planned_path_intersects_blocked(environment, planner, drone)
 
         if noise >= self._crit:
             sensor_level: FaultLevel = "CRITICAL"
@@ -79,11 +113,20 @@ class FaultDetector:
 
         return FaultStatus(level="NOMINAL", type="none", details="Nominal.")
 
-    def _planned_path_intersects_blocked(self, environment: Environment, planner: BasePlanner) -> bool:
+    def _planned_path_intersects_blocked(
+        self,
+        environment: Environment,
+        planner: BasePlanner,
+        drone: Drone,
+    ) -> bool:
         path = planner.get_full_path()
         if not path:
             return True
+        px, py = int(drone.position[0]), int(drone.position[1])
         for x, y in path:
-            if environment.is_blocked(int(x), int(y)):
+            ix, iy = int(x), int(y)
+            if (ix, iy) == (px, py):
+                continue
+            if environment.is_blocked(ix, iy):
                 return True
         return False

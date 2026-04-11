@@ -9,6 +9,35 @@
   var INF = Infinity;
   var SQRT2 = Math.SQRT2;
 
+  /** FNV-1a hash of JSON config — seed for deterministic PRNG (Easy Open). */
+  function hashConfig(config) {
+    var s = JSON.stringify(config);
+    var h = 2166136261 >>> 0;
+    for (var i = 0; i < s.length; i++) {
+      h ^= s.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    return h >>> 0;
+  }
+
+  function mulberry32(a) {
+    return function () {
+      a |= 0;
+      a = (a + 0x6d2b79f5) | 0;
+      var t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  /** Standard normal via Box–Muller; u1 must be in (0,1]. */
+  function randn01(rng) {
+    var u1 = 0;
+    while (u1 <= 1e-12) u1 = rng();
+    var u2 = rng();
+    return Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
+  }
+
   function hypot(dx, dy) { return Math.hypot(dx, dy); }
   function hFun(a, b) { return hypot(a[0] - b[0], a[1] - b[1]); }
   function isClose(a, b) { return Math.abs(a - b) < 1e-9; }
@@ -86,18 +115,22 @@
   Object.defineProperty(Environment.prototype, 'width', { get: function () { return this._w; } });
   Object.defineProperty(Environment.prototype, 'height', { get: function () { return this._h; } });
 
-  Environment.prototype.is_blocked = function (x, y) {
+  Environment.prototype.is_blocked = function (x, y, exempt, ignoreHazardCells) {
+    if (exempt != null && (x | 0) === exempt[0] && (y | 0) === exempt[1]) return false;
     if (x < 0 || y < 0 || x >= this._w || y >= this._h) return true;
-    return this._grid[this._idx(x, y)] !== FREE;
+    var v = this._grid[this._idx(x, y)];
+    if (ignoreHazardCells) return v === OBSTACLE;
+    return v !== FREE;
   };
 
-  Environment.prototype.get_neighbors = function (x, y) {
+  Environment.prototype.get_neighbors = function (x, y, ignoreHazardCells) {
+    var ign = !!ignoreHazardCells;
     var out = [];
     for (var dx = -1; dx <= 1; dx++) {
       for (var dy = -1; dy <= 1; dy++) {
         if (dx === 0 && dy === 0) continue;
         var nx = x + dx, ny = y + dy;
-        if (!this.is_blocked(nx, ny)) out.push([nx, ny]);
+        if (!this.is_blocked(nx, ny, null, ign)) out.push([nx, ny]);
       }
     }
     return out;
@@ -188,7 +221,37 @@
     this._gw = config.environment.grid_size[0] | 0;
     this._gh = config.environment.grid_size[1] | 0;
     this._speedScale = 1;
+    /** Set in runSimulation — mulberry32 instance for reproducible noise / move skips. */
+    this._rng = null;
   }
+  Drone.prototype.get_effective_sensor_range = function () {
+    var ratio = this.sensor_noise_level / Math.max(this._maxNoise, 1e-9);
+    if (ratio > 1) ratio = 1;
+    return this._sensorRange * (1.0 - 0.5 * ratio);
+  };
+  Drone.prototype.get_position_estimate = function (env) {
+    var rng = this._rng;
+    if (!rng) throw new Error('drone._rng not set');
+    var std = this.sensor_noise_level * 5.0;
+    var nx = Math.round(randn01(rng) * std);
+    var ny = Math.round(randn01(rng) * std);
+    var px = this.position[0] | 0, py = this.position[1] | 0;
+    var gw = env._w, gh = env._h;
+    var estX = Math.max(0, Math.min(gw - 1, px + nx));
+    var estY = Math.max(0, Math.min(gh - 1, py + ny));
+    if (!env.is_blocked(estX, estY)) return [estX, estY];
+    var maxR = Math.max(gw, gh);
+    for (var rad = 1; rad < maxR; rad++) {
+      for (var dx = -rad; dx <= rad; dx++) {
+        for (var dy = -rad; dy <= rad; dy++) {
+          if (Math.max(Math.abs(dx), Math.abs(dy)) !== rad) continue;
+          var ex = estX + dx, ey = estY + dy;
+          if (ex >= 0 && ex < gw && ey >= 0 && ey < gh && !env.is_blocked(ex, ey)) return [ex, ey];
+        }
+      }
+    }
+    return [px, py];
+  };
   Drone.prototype.get_telemetry = function () {
     return {
       battery: this.battery,
@@ -201,9 +264,10 @@
     this._speedScale = Math.max(0.1, Math.min(1, s));
   };
   Drone.prototype.sense = function (env) {
+    var rng = this._rng;
     var x = this.position[0], y = this.position[1];
     var obs = [];
-    var r = this._sensorRange;
+    var r = this.get_effective_sensor_range();
     var ri = Math.ceil(r);
     for (var cx = x - ri; cx <= x + ri; cx++) {
       for (var cy = y - ri; cy <= y + ri; cy++) {
@@ -212,9 +276,16 @@
         if (env._grid[env._idx(cx, cy)] !== FREE) obs.push([cx, cy]);
       }
     }
+    var sigma = Math.max(this.sensor_noise_level, 0) * 0.5;
+    var pex = x, pey = y;
+    if (sigma > 0 && rng) {
+      pex = x + randn01(rng) * sigma;
+      pey = y + randn01(rng) * sigma;
+    }
     return {
       observed_obstacles: obs,
-      position_estimate: [x, y]
+      position_estimate: [pex, pey],
+      effective_sensor_range: r
     };
   };
   Drone.prototype.apply_sensor_degradation = function (sev) {
@@ -224,9 +295,16 @@
     this.sensor_noise_level = Math.max(this._baseNoise, this.sensor_noise_level - amt);
   };
   Drone.prototype.move = function (tx, ty) {
+    var rng = this._rng;
     var x = this.position[0], y = this.position[1];
     tx |= 0; ty |= 0;
     if (x === tx && y === ty) return;
+    if (this._speedScale < 1.0 && rng) {
+      if (rng() > this._speedScale) {
+        this.battery = Math.max(0, this.battery - this._drain * this._speedScale * 0.5);
+        return;
+      }
+    }
     var best = null, bestD = INF;
     for (var nx = x - 1; nx <= x + 1; nx++) {
       for (var ny = y - 1; ny <= y + 1; ny++) {
@@ -374,12 +452,40 @@
     this._crit = +algo.critical_fault_threshold;
   }
   FaultDetector.prototype.evaluate = function (drone, env, planner) {
+    var px = drone.position[0] | 0, py = drone.position[1] | 0;
+    if (env.is_blocked(px, py)) {
+      var nbsEg = env.get_neighbors(px, py, true);
+      if (!nbsEg.length) {
+        return { level: 'CRITICAL', type: 'position_trapped', details: 'surrounded' };
+      }
+      var path0 = planner.get_full_path();
+      var escapePlanned = false;
+      if (path0.length >= 2) {
+        var n0 = [path0[0][0] | 0, path0[0][1] | 0];
+        var n1 = [path0[1][0] | 0, path0[1][1] | 0];
+        var j, nb;
+        if (n0[0] === px && n0[1] === py) {
+          for (j = 0; j < nbsEg.length; j++) {
+            nb = nbsEg[j];
+            if (nb[0] === n1[0] && nb[1] === n1[1] && !env.is_blocked(n1[0], n1[1], null, true)) {
+              escapePlanned = true;
+              break;
+            }
+          }
+        }
+      }
+      if (!escapePlanned) {
+        return { level: 'CRITICAL', type: 'position_compromised', details: 'in hazard' };
+      }
+    }
     var noise = drone.sensor_noise_level;
     var path = planner.get_full_path();
     var pathBlocked = !path.length;
     if (!pathBlocked) {
       for (var i = 0; i < path.length; i++) {
-        if (env.is_blocked(path[i][0], path[i][1])) { pathBlocked = true; break; }
+        var ix = path[i][0] | 0, iy = path[i][1] | 0;
+        if (ix === px && iy === py) continue;
+        if (env.is_blocked(ix, iy)) { pathBlocked = true; break; }
       }
     }
     var sensorLevel = noise >= this._crit ? 'CRITICAL' : (noise >= this._warn ? 'WARNING' : 'NOMINAL');
@@ -398,6 +504,7 @@
     this._batFrac = 0.05;
     this._state = 'NOMINAL';
     this.requires_replan = false;
+    this.emergency_escape = false;
     this._log = [];
     this._prevNoise = null;
     this._lastTs = 0;
@@ -428,12 +535,28 @@
   };
   FSM.prototype.update = function (timestep, fs, drone, mm) {
     this._lastTs = timestep;
+    if (this._state === 'ABORT') {
+      this._prevNoise = drone.sensor_noise_level;
+      return;
+    }
+    if (fs.type === 'position_trapped') {
+      this._transition(timestep, this._state, 'ABORT', 'position_trapped', drone, mm);
+      this.requires_replan = false;
+      this.emergency_escape = false;
+      this._prevNoise = drone.sensor_noise_level;
+      return;
+    }
     if (this._battery_low(drone)) {
       this._transition(timestep, this._state, 'ABORT', 'battery_below_5pct', drone, mm);
       this._prevNoise = drone.sensor_noise_level;
       return;
     }
-    if (this._state === 'ABORT') {
+    if (fs.type === 'position_compromised') {
+      if (this._state !== 'REPLANNING') {
+        this._transition(timestep, this._state, 'REPLANNING', 'emergency_escape', drone, mm);
+      }
+      this.requires_replan = true;
+      this.emergency_escape = true;
       this._prevNoise = drone.sensor_noise_level;
       return;
     }
@@ -477,14 +600,16 @@
     }
   };
   FSM.prototype._fromReplanning = function (timestep, fs, drone, mm) {
-    if (fs.level === 'CRITICAL') {
+    if (fs.level === 'CRITICAL' && fs.type !== 'position_compromised') {
       this._transition(timestep, 'REPLANNING', 'SAFE_MODE', 'critical_while_replanning', drone, mm);
     }
   };
   FSM.prototype.replan_succeeded = function (fs, drone, mm) {
     if (this._state !== 'REPLANNING') return;
     var ts = this._lastTs;
-    if (fs.level === 'CRITICAL') this._transition(ts, 'REPLANNING', 'SAFE_MODE', 'replan_done_critical_fault', drone, mm);
+    if (fs.level === 'CRITICAL' && fs.type !== 'position_compromised') {
+      this._transition(ts, 'REPLANNING', 'SAFE_MODE', 'replan_done_critical_fault', drone, mm);
+    }
     else if (fs.level === 'WARNING') this._transition(ts, 'REPLANNING', 'DEGRADED', 'replan_succeeded_warning', drone, mm);
     else this._transition(ts, 'REPLANNING', 'NOMINAL', 'replan_succeeded_nominal', drone, mm);
     this.requires_replan = false;
@@ -528,6 +653,8 @@
     this._lastProcessedTimestep = -1;
     this._path = [];
     this._timingWrap = null;
+    this._exemptCell = null;
+    this._ignoreHazardCells = false;
   }
   DStarLitePlanner.prototype._ig = function (x, y) { return this._g[y * this._w + x]; };
   DStarLitePlanner.prototype._irhs = function (x, y) { return this._rhs[y * this._w + x]; };
@@ -542,15 +669,17 @@
   };
 
   DStarLitePlanner.prototype._edgeCost = function (u, v) {
+    var ex = this._exemptCell;
+    var ign = this._ignoreHazardCells;
     var ux = u[0], uy = u[1], vx = v[0], vy = v[1];
-    if (this._env.is_blocked(vx, vy) || this._env.is_blocked(ux, uy)) return INF;
+    if (this._env.is_blocked(vx, vy, ex, ign) || this._env.is_blocked(ux, uy, ex, ign)) return INF;
     if (Math.abs(ux - vx) + Math.abs(uy - vy) === 1) return 1;
     if (Math.abs(ux - vx) === 1 && Math.abs(uy - vy) === 1) return SQRT2;
     return INF;
   };
 
   DStarLitePlanner.prototype._succ = function (u) {
-    return this._env.get_neighbors(u[0], u[1]);
+    return this._env.get_neighbors(u[0], u[1], this._ignoreHazardCells);
   };
 
   DStarLitePlanner.prototype._pred = function (u) {
@@ -677,13 +806,23 @@
     this.update_vertex([gx, gy]);
   };
 
-  DStarLitePlanner.prototype.plan = function (start, goal, env) {
-    if (env.is_blocked(start[0], start[1]) || env.is_blocked(goal[0], goal[1])) throw new Error('blocked');
+  DStarLitePlanner.prototype.plan = function (start, goal, env, exemptStart) {
+    exemptStart = !!exemptStart;
+    this._exemptCell = null;
+    this._ignoreHazardCells = false;
+    var sx = start[0] | 0, sy = start[1] | 0, gx = goal[0] | 0, gy = goal[1] | 0;
+    if (!exemptStart) {
+      if (env.is_blocked(sx, sy) || env.is_blocked(gx, gy)) throw new Error('blocked');
+    } else {
+      if (env.is_blocked(gx, gy)) throw new Error('blocked');
+      this._exemptCell = [sx, sy];
+      this._ignoreHazardCells = true;
+    }
     var t0 = performance.now();
     this._env = env;
     this._w = env._w; this._hgt = env._h;
-    this._sStart = [start[0] | 0, start[1] | 0];
-    this._sGoal = [goal[0] | 0, goal[1] | 0];
+    this._sStart = [sx, sy];
+    this._sGoal = [gx, gy];
     this._sLast = this._sStart.slice();
     this._km = 0;
     this._initialize();
@@ -695,15 +834,25 @@
     return this._path.slice();
   };
 
-  DStarLitePlanner.prototype.replan = function (cur, goal, env) {
+  DStarLitePlanner.prototype.replan = function (cur, goal, env, exemptStart) {
+    exemptStart = !!exemptStart;
     if ((goal[0] | 0) !== this._sGoal[0] || (goal[1] | 0) !== this._sGoal[1]) {
-      this.plan(cur, goal, env);
+      this.plan(cur, goal, env, exemptStart);
       return;
     }
     var t0 = performance.now();
-    if (env.is_blocked(cur[0], cur[1]) || env.is_blocked(goal[0], goal[1])) throw new Error('blocked');
-    this._env = env;
+    this._exemptCell = null;
+    this._ignoreHazardCells = false;
+    var gx = goal[0] | 0, gy = goal[1] | 0;
     var c = [cur[0] | 0, cur[1] | 0];
+    if (!exemptStart) {
+      if (env.is_blocked(c[0], c[1]) || env.is_blocked(gx, gy)) throw new Error('blocked');
+    } else {
+      if (env.is_blocked(gx, gy)) throw new Error('blocked');
+      this._exemptCell = c.slice();
+      this._ignoreHazardCells = true;
+    }
+    this._env = env;
     if (c[0] !== this._sLast[0] || c[1] !== this._sLast[1]) {
       this._km += hFun(this._sLast, c);
       this._sLast = c.slice();
@@ -779,12 +928,23 @@
     this._goal = [0, 0];
     this._path = [];
     this._timingWrap = null;
+    this._exemptCell = null;
+    this._ignoreHazardCells = false;
   }
   AStarPlanner.prototype._edgeCost = DStarLitePlanner.prototype._edgeCost;
-  AStarPlanner.prototype.plan = function (start, goal, env) {
+  AStarPlanner.prototype.plan = function (start, goal, env, exemptStart) {
+    exemptStart = !!exemptStart;
+    this._exemptCell = null;
+    this._ignoreHazardCells = false;
     var t0 = performance.now();
     var sx = start[0] | 0, sy = start[1] | 0, gx = goal[0] | 0, gy = goal[1] | 0;
-    if (env.is_blocked(sx, sy) || env.is_blocked(gx, gy)) throw new Error('blocked');
+    if (!exemptStart) {
+      if (env.is_blocked(sx, sy) || env.is_blocked(gx, gy)) throw new Error('blocked');
+    } else {
+      if (env.is_blocked(gx, gy)) throw new Error('blocked');
+      this._exemptCell = [sx, sy];
+      this._ignoreHazardCells = true;
+    }
     this._env = env;
     this._goal = [gx, gy];
     if (sx === gx && sy === gy) {
@@ -815,7 +975,7 @@
         if (this._timingWrap) this._timingWrap.push({ kind: 'plan', ms: performance.now() - t0, timestep: env.current_timestep });
         return this._path.slice();
       }
-      var neigh = env.get_neighbors(ux, uy);
+      var neigh = env.get_neighbors(ux, uy, this._ignoreHazardCells);
       for (var i = 0; i < neigh.length; i++) {
         var v = neigh[i];
         var c = this._edgeCost([ux, uy], v);
@@ -855,9 +1015,9 @@
     return pathRev;
   };
 
-  AStarPlanner.prototype.replan = function (cur, goal, env) {
+  AStarPlanner.prototype.replan = function (cur, goal, env, exemptStart) {
     var t0 = performance.now();
-    this.plan(cur, goal, env);
+    this.plan(cur, goal, env, !!exemptStart);
     if (this._timingWrap) this._timingWrap.push({ kind: 'replan', ms: performance.now() - t0, timestep: env.current_timestep });
   };
 
@@ -1004,14 +1164,48 @@
     }
   }
 
+  function planningPosition(drone, env, fsm) {
+    var st = fsm.get_state();
+    if (st === 'DEGRADED' || st === 'REPLANNING' || st === 'SAFE_MODE') {
+      return drone.get_position_estimate(env);
+    }
+    return [drone.position[0] | 0, drone.position[1] | 0];
+  }
+
+  /**
+   * plan() throws if start or goal cell is blocked — e.g. drone still on a cell
+   * that just became a hazard while skipBlockedWaypoints advanced the goal.
+   * Retry with a fresh planner once; on second failure return a new planner with no path.
+   */
+  function safePlan(planner, start, goal, env, plannerKind) {
+    var ex = env.is_blocked(start[0], start[1]);
+    try {
+      planner.plan(start, goal, env, ex);
+      return planner;
+    } catch (e1) {
+      var p2 = makePlanner(plannerKind);
+      p2._timingWrap = planner._timingWrap;
+      try {
+        p2.plan(start, goal, env, ex);
+        return p2;
+      } catch (e2) {
+        var p3 = makePlanner(plannerKind);
+        p3._timingWrap = planner._timingWrap;
+        return p3;
+      }
+    }
+  }
+
   /**
    * Run full simulation; returns export-shaped object.
    */
   function runSimulation(config, plannerKind, maxSteps) {
     maxSteps = maxSteps || 2000;
     var timings = [];
+    var rng = mulberry32(hashConfig(config));
     var env = new Environment(deepCopy(config));
     var drone = new Drone(deepCopy(config));
+    drone._rng = rng;
     if (env.is_blocked(drone.position[0], drone.position[1])) throw new Error('start blocked');
     var mm = new MissionManager(deepCopy(config));
     var faultInj = new FaultInjector(config.fault_injection || {});
@@ -1022,7 +1216,7 @@
     var waypointCount = config.mission.waypoints.length;
     skipBlockedWaypoints(env, mm, fsm, waypointCount, 0);
     var lastGoal = mm.get_current_target();
-    planner.plan(drone.position, lastGoal, env);
+    planner = safePlan(planner, drone.position, lastGoal, env, plannerKind);
 
     var replanEvents = [];
     var timeline = [];
@@ -1042,11 +1236,12 @@
       var gt = mm.get_current_target();
       if (gt[0] !== lastGoal[0] || gt[1] !== lastGoal[1]) {
         lastGoal = gt.slice();
-        planner.plan(drone.position, lastGoal, env);
+        planner = safePlan(planner, planningPosition(drone, env, fsm), lastGoal, env, plannerKind);
       }
 
       var faultStatus = fd.evaluate(drone, env, planner);
       fsm.update(timestep, faultStatus, drone, mm);
+      var planningPos = planningPosition(drone, env, fsm);
 
       var replannedThisStep = false;
       var pathBeforeReplan = null;
@@ -1054,8 +1249,9 @@
         var pathBefore = planner.get_full_path().map(function (p) { return [p[0], p[1]]; });
         pathBeforeReplan = pathBefore;
         replannedThisStep = true;
+        var exemptStart = fsm.emergency_escape;
         try {
-          planner.replan(drone.position, mm.get_current_target(), env);
+          planner.replan(planningPos, mm.get_current_target(), env, exemptStart);
           var pathOk = planner.get_full_path().length > 0;
           var pathAfter = planner.get_full_path().map(function (p) { return [p[0], p[1]]; });
           replanEvents.push({ timestep: timestep, path_before: pathBefore, path_after: pathAfter });
@@ -1065,20 +1261,33 @@
         } catch (err) {
           replanEvents.push({ timestep: timestep, path_before: pathBefore, path_after: [], error: true });
           fsm.replan_failed(drone, mm);
+        } finally {
+          fsm.emergency_escape = false;
         }
+      } else if (fsm.get_state() === 'DEGRADED' || fsm.get_state() === 'REPLANNING' || fsm.get_state() === 'SAFE_MODE') {
+        try {
+          var ppx = planningPos[0] | 0, ppy = planningPos[1] | 0;
+          planner.replan(planningPos, mm.get_current_target(), env, env.is_blocked(ppx, ppy));
+        } catch (e) {}
       }
 
       if (fsm.get_state() === 'SAFE_MODE' && mm.mission_status === 'aborted') {
-        try { planner.replan(drone.position, mm.get_current_target(), env); } catch (e) {}
         fsm.check_safe_mode_abort(timestep, drone, mm, planner);
       }
 
       var nextMove;
       try {
-        nextMove = planner.get_next_step(drone.position);
+        nextMove = planner.get_next_step(planningPos);
       } catch (e) {
-        if (fsm.get_state() === 'REPLANNING') fsm.replan_failed(drone, mm);
-        nextMove = drone.position.slice();
+        var px = drone.position[0] | 0, py = drone.position[1] | 0;
+        if (env.is_blocked(px, py)) {
+          var neigh = env.get_neighbors(px, py);
+          if (!neigh.length) neigh = env.get_neighbors(px, py, true);
+          nextMove = neigh.length ? neigh[0].slice() : drone.position.slice();
+        } else {
+          if (fsm.get_state() === 'REPLANNING') fsm.replan_failed(drone, mm);
+          nextMove = drone.position.slice();
+        }
       }
       drone.move(nextMove[0], nextMove[1]);
       mm.update(drone.position);
@@ -1088,7 +1297,13 @@
       var newFsm = logFull.slice(fsmLogCursor);
       fsmLogCursor = logFull.length;
       var wp = mm.get_progress();
-      var pe = senseData.position_estimate;
+      var stNow = fsm.get_state();
+      var pe;
+      if (stNow === 'DEGRADED' || stNow === 'REPLANNING' || stNow === 'SAFE_MODE') {
+        pe = [planningPos[0], planningPos[1]];
+      } else {
+        pe = senseData.position_estimate;
+      }
       var planned = planner.get_full_path().map(function (p) { return [p[0] | 0, p[1] | 0]; });
 
       timeline.push({
@@ -1096,6 +1311,7 @@
         drone: {
           position: [drone.position[0], drone.position[1]],
           position_estimate: [pe[0], pe[1]],
+          planning_position: [planningPos[0] | 0, planningPos[1] | 0],
           heading: drone.heading,
           battery: drone.battery,
           battery_pct: batCap > 0 ? Math.round(10000 * drone.battery / batCap) / 100 : 0,
@@ -1171,6 +1387,7 @@
     buildEnvironmentExport: buildEnvironmentExport,
     mergeExportEvents: mergeExportEvents,
     plannerDisplayName: plannerDisplayName,
-    missionResultString: missionResultString
+    missionResultString: missionResultString,
+    hashConfig: hashConfig
   };
 })(typeof window !== 'undefined' ? window : this);

@@ -235,6 +235,45 @@ def test_integration_loop_150_steps_observes_faults(mission_config: dict) -> Non
     assert any(e.get("timestep") == 40 for e in r["fsm_transition_log"])
 
 
+def test_emergency_escape_hazard_on_drone_completes_mission(mission_config: dict) -> None:
+    """Dynamic hazard spawns on the drone cell mid-route; planner must leave the cell and finish."""
+    from main import run_simulation
+
+    root = Path(__file__).resolve().parents[1]
+    cfg = json.loads((root / "config" / "mission_emergency_escape.json").read_text(encoding="utf-8"))
+    for planner_name in ("d_star_lite", "a_star"):
+        cfg = cfg.copy()
+        cfg["algorithm"] = {**cfg["algorithm"], "primary_planner": planner_name}
+        r = run_simulation(cfg, 120, verbose=False, no_viz=True)
+        log = r["fsm_transition_log"]
+        assert any(
+            e.get("trigger") == "emergency_escape" and e.get("to_state") == "REPLANNING" for e in log
+        ), f"expected emergency_escape transition for {planner_name}"
+        assert r["final_timestep"] < 119, f"mission should finish before horizon ({planner_name})"
+
+
+def test_detector_position_trapped(mission_config: dict) -> None:
+    cfg = mission_config.copy()
+    drone = Drone(cfg)
+    env = Environment(
+        {
+            "environment": {
+                "grid_size": [5, 5],
+                "static_obstacles": [],
+                "dynamic_hazards": [],
+            }
+        }
+    )
+    for x in range(5):
+        for y in range(5):
+            env.register_obstacle(x, y)
+    drone.position = (2, 2)
+    p = DStarLitePlanner()
+    det = FaultDetector(cfg["algorithm"])
+    fs = det.evaluate(drone, env, p)
+    assert fs.type == "position_trapped"
+
+
 def test_fsm_replan_succeeded_nominal(mission_config: dict) -> None:
     from src.faults.fault_detector import FaultStatus
 

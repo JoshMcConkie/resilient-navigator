@@ -196,6 +196,18 @@ class Dashboard:
         )
         self._ax_map.add_patch(self._drone_poly)
 
+        self._planning_dot = Circle(
+            (-1.0, -1.0),
+            0.22,
+            facecolor="#2e7d32",
+            edgecolor="#1b5e20",
+            linewidth=0.8,
+            alpha=0.45,
+            zorder=6,
+            visible=False,
+        )
+        self._ax_map.add_patch(self._planning_dot)
+
         self._ax_map.legend(loc="upper right", fontsize=8)
 
         # Right panel layout (figure coordinates)
@@ -274,6 +286,7 @@ class Dashboard:
         timestep: int,
         *,
         fault_injector: FaultInjector | None = None,
+        planning_position: tuple[int, int] | None = None,
     ) -> None:
         """Update all artists for the current frame and pause for ``1/fps`` seconds."""
         if not self._enabled or self._fig is None:
@@ -290,6 +303,11 @@ class Dashboard:
 
         px, py = drone.position
         cx, cy = px + 0.5, py + 0.5
+        ppx, ppy = (
+            (planning_position[0], planning_position[1])
+            if planning_position is not None
+            else (px, py)
+        )
 
         # Trail
         self._trail.append((cx, cy))
@@ -300,15 +318,16 @@ class Dashboard:
         else:
             self._line_trail.set_data([], [])
 
-        # Planned path
+        # Planned path (anchor to planner's assumed position when degraded)
         if self._show_path:
             path = planner.get_full_path()
             if path:
                 xs = [p[0] + 0.5 for p in path]
                 ys = [p[1] + 0.5 for p in path]
-                if (px + 0.5, py + 0.5) != (xs[0], ys[0]):
-                    xs = [px + 0.5] + xs
-                    ys = [py + 0.5] + ys
+                ax0, ay0 = ppx + 0.5, ppy + 0.5
+                if (ax0, ay0) != (xs[0], ys[0]):
+                    xs = [ax0] + xs
+                    ys = [ay0] + ys
                 self._line_path.set_data(xs, ys)
             else:
                 self._line_path.set_data([], [])
@@ -318,14 +337,20 @@ class Dashboard:
         # Drone (triangle; tip aligns with heading, CCW from +x)
         self._drone_poly.set_xy(_drone_triangle_xy(cx, cy, float(drone.heading)))
 
-        # Sensor disk
+        # Sensor disk (effective range shrinks with noise)
         if self._show_sensor:
-            r = float(drone.sensor_range)
+            r = float(drone.get_effective_sensor_range())
             self._sensor_patch.center = (cx, cy)
             self._sensor_patch.set_radius(r)
             self._sensor_patch.set_visible(True)
         else:
             self._sensor_patch.set_visible(False)
+
+        if planning_position is not None and (ppx, ppy) != (px, py):
+            self._planning_dot.center = (ppx + 0.5, ppy + 0.5)
+            self._planning_dot.set_visible(True)
+        else:
+            self._planning_dot.set_visible(False)
 
         # Waypoint emphasis
         wps = mission_manager.get_progress()
