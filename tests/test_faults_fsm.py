@@ -222,7 +222,13 @@ def test_integration_loop_150_steps_observes_faults(mission_config: dict) -> Non
     """Run the main loop for 150+ steps without early mission exit to exercise schedules."""
     from main import run_simulation
 
-    r = run_simulation(mission_config, 155, verbose=False, stop_on_mission_complete=False)
+    r = run_simulation(
+        mission_config,
+        155,
+        verbose=False,
+        stop_on_mission_complete=False,
+        no_viz=True,
+    )
     assert r["final_timestep"] == 155
     assert len(r["fsm_transition_log"]) >= 1
     # mission_01: sensor degradation scheduled at t=50 → FSM should log at least that transition.

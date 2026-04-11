@@ -15,6 +15,7 @@ from src.decision.fsm import AutonomyFSM
 from src.faults.fault_detector import FaultDetector
 from src.faults.fault_injector import FaultInjector
 from src.planners.d_star_lite import DStarLitePlanner
+from src.viz.dashboard import Dashboard
 
 
 def load_config(path: Path) -> dict[str, Any]:
@@ -49,11 +50,23 @@ def run_simulation(
     verbose: bool = True,
     *,
     stop_on_mission_complete: bool = True,
+    no_viz: bool = False,
 ) -> dict[str, Any]:
     """Main loop (plan.md): fault injector → env → sense → detect → FSM → replan → move → mission."""
     environment = Environment(config)
     drone = Drone(config)
     mission_manager = MissionManager(config)
+    viz_cfg = dict(config["visualization"])
+    if no_viz:
+        viz_cfg["dashboard_enabled"] = False
+    waypoints_xy = [(int(w[0]), int(w[1])) for w in config["mission"]["waypoints"]]
+    dashboard = Dashboard(
+        viz_cfg,
+        environment,
+        config["algorithm"],
+        config["drone"],
+        waypoints_xy,
+    )
     fault_injector = FaultInjector(config["fault_injection"])
     fault_detector = FaultDetector(config["algorithm"])
     fsm = AutonomyFSM(config["mission"], config["algorithm"])
@@ -131,6 +144,20 @@ def run_simulation(
         drone.move(next_move)
         mission_manager.update(drone.position)
 
+        dashboard.render(
+            drone,
+            environment,
+            planner,
+            fsm,
+            mission_manager,
+            timestep,
+            fault_injector=fault_injector,
+        )
+        if dashboard.is_closed:
+            if verbose:
+                print("Dashboard window closed; stopping simulation.")
+            break
+
         if verbose and (timestep % 25 == 0 or timestep < 5):
             print(
                 f"t={timestep:4d}  FSM={fsm.get_state():12s}  pos={drone.position}  "
@@ -151,6 +178,8 @@ def run_simulation(
             break
 
         timestep += 1
+
+    dashboard.finalize()
 
     transition_log = fsm.get_transition_log()
     if verbose:
@@ -189,6 +218,11 @@ def main() -> None:
         action="store_true",
         help="Do not stop when mission completes (for integration demos / long fault schedules)",
     )
+    parser.add_argument(
+        "--no-viz",
+        action="store_true",
+        help="Disable matplotlib dashboard (headless / CI)",
+    )
     args = parser.parse_args()
 
     config = load_config(args.config)
@@ -197,6 +231,7 @@ def main() -> None:
         args.max_steps,
         verbose=not args.quiet,
         stop_on_mission_complete=not args.run_full_horizon,
+        no_viz=args.no_viz,
     )
 
 
