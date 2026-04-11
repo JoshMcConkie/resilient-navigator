@@ -49,6 +49,31 @@ class AutonomyFSM:
         """Append-only history of state changes."""
         return list(self._transition_log)
 
+    def record_waypoint_skipped(self, timestep: int, reason: str) -> None:
+        """Log that the current waypoint was skipped (e.g. target cell blocked); FSM state unchanged."""
+        self._transition_log.append(
+            {
+                "timestep": timestep,
+                "from_state": self._state.value,
+                "to_state": self._state.value,
+                "trigger": f"waypoint_skipped_{reason}",
+            }
+        )
+
+    def check_depleted_battery_abort(
+        self,
+        timestep: int,
+        drone: Drone,
+        mission_manager: MissionManager,
+    ) -> None:
+        """If battery is empty, transition to ABORT (covers last move draining pack before next FSM update)."""
+        if self._state == FSMState.ABORT:
+            return
+        if float(drone.get_telemetry()["battery"]) > 0.0:
+            return
+        prev = self._state
+        self._transition(timestep, prev, FSMState.ABORT, "battery_depleted", drone, mission_manager)
+
     def update(
         self,
         timestep: int,
@@ -84,9 +109,13 @@ class AutonomyFSM:
         self._prev_noise = float(drone.sensor_noise_level)
 
     def _battery_low(self, drone: Drone) -> bool:
+        """True when battery is depleted or below the configured critical fraction of capacity."""
         tel = drone.get_telemetry()
+        bat = float(tel["battery"])
         cap = float(tel["battery_capacity"])
-        return float(tel["battery"]) <= self._battery_fraction_abort * cap
+        if bat <= 0.0:
+            return True
+        return bat <= self._battery_fraction_abort * cap
 
     def _from_nominal(
         self,

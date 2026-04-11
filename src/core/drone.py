@@ -13,9 +13,15 @@ from src.core.environment import Environment, FREE
 class Drone:
     """Drone state and motion; parameters from JSON config."""
 
-    def __init__(self, config: dict[str, Any]) -> None:
+    def __init__(self, config: dict[str, Any], *, environment: Environment | None = None) -> None:
         d = config["drone"]
         sx, sy = int(d["start_position"][0]), int(d["start_position"][1])
+        env_probe = environment if environment is not None else Environment(config)
+        if env_probe.is_blocked(sx, sy):
+            raise ValueError(
+                f"Drone start position ({sx}, {sy}) is blocked or in a hazard; "
+                "choose a free cell in the mission JSON."
+            )
         self.position: tuple[int, int] = (sx, sy)
         self.velocity: tuple[float, float] = (0.0, 0.0)
         self.battery: float = float(d["battery_capacity"])

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal
+from typing import Any, Literal
 
 from src.core.drone import Drone
 from src.core.environment import Environment
@@ -28,7 +28,7 @@ class FaultDetector:
     crosses blocked cells. Does **not** choose control actions.
     """
 
-    def __init__(self, algorithm_config: dict) -> None:
+    def __init__(self, algorithm_config: dict[str, Any]) -> None:
         self._warn = float(algorithm_config["sensor_degradation_threshold"])
         self._crit = float(algorithm_config["critical_fault_threshold"])
 

@@ -14,21 +14,25 @@ from src.core.mission_manager import MissionManager
 from src.decision.fsm import AutonomyFSM
 from src.faults.fault_detector import FaultDetector
 from src.faults.fault_injector import FaultInjector
+from src.planners.a_star import AStarPlanner
+from src.planners.base_planner import BasePlanner
 from src.planners.d_star_lite import DStarLitePlanner
 from src.viz.dashboard import Dashboard
 
 
 def load_config(path: Path) -> dict[str, Any]:
+    """Load a mission JSON file from disk."""
     with path.open(encoding="utf-8") as f:
         return json.load(f)
 
 
-def _print_segment_paths(config: dict[str, Any], environment: Environment, planner: DStarLitePlanner) -> None:
-    """Print D* full path for each waypoint-to-waypoint segment (initial map, no dynamic hazards)."""
+def _print_segment_paths(config: dict[str, Any], environment: Environment, planner: BasePlanner) -> None:
+    """Print full path for each waypoint-to-waypoint segment (initial map, no dynamic hazards)."""
     wps = config["mission"]["waypoints"]
     start = (int(config["drone"]["start_position"][0]), int(config["drone"]["start_position"][1]))
     prev = start
-    print("Waypoint segment paths (D* Lite, static map only):")
+    label = planner.get_name().replace("_", " ")
+    print(f"Waypoint segment paths ({label}, static map only):")
     for i, wp in enumerate(wps):
         goal = (int(wp[0]), int(wp[1]))
         path = planner.plan(prev, goal, environment)
@@ -37,11 +41,30 @@ def _print_segment_paths(config: dict[str, Any], environment: Environment, plann
         prev = goal
 
 
-def _make_planner(config: dict[str, Any]) -> DStarLitePlanner:
+def _make_planner(config: dict[str, Any]) -> BasePlanner:
+    """Instantiate the configured primary planner (``algorithm.primary_planner`` in JSON)."""
     primary = config["algorithm"]["primary_planner"]
     if primary == "d_star_lite":
         return DStarLitePlanner()
+    if primary == "a_star":
+        return AStarPlanner()
     raise NotImplementedError(f"Planner not implemented: {primary}")
+
+
+def _skip_blocked_waypoints(
+    environment: Environment,
+    mission_manager: MissionManager,
+    fsm: AutonomyFSM,
+    waypoint_count: int,
+    timestep: int,
+) -> None:
+    """Advance past waypoints whose target cell is blocked (e.g. inside a hazard)."""
+    while mission_manager.mission_status == "in_progress" and mission_manager.current_waypoint_index < waypoint_count:
+        tx, ty = mission_manager.get_current_target()
+        if not environment.is_blocked(tx, ty):
+            break
+        fsm.record_waypoint_skipped(timestep, "target_cell_blocked")
+        mission_manager.skip_waypoint()
 
 
 def run_simulation(
@@ -54,7 +77,7 @@ def run_simulation(
 ) -> dict[str, Any]:
     """Main loop (plan.md): fault injector → env → sense → detect → FSM → replan → move → mission."""
     environment = Environment(config)
-    drone = Drone(config)
+    drone = Drone(config, environment=environment)
     mission_manager = MissionManager(config)
     viz_cfg = dict(config["visualization"])
     if no_viz:
@@ -70,11 +93,11 @@ def run_simulation(
     fault_injector = FaultInjector(config["fault_injection"])
     fault_detector = FaultDetector(config["algorithm"])
     fsm = AutonomyFSM(config["mission"], config["algorithm"])
-    if verbose:
-        _print_segment_paths(config, environment, _make_planner(config))
-
+    waypoint_count = len(config["mission"]["waypoints"])
     planner = _make_planner(config)
-
+    _skip_blocked_waypoints(environment, mission_manager, fsm, waypoint_count, 0)
+    if verbose:
+        _print_segment_paths(config, environment, planner)
     goal = mission_manager.get_current_target()
     planner.plan(drone.position, goal, environment)
     last_goal: tuple[int, int] = goal
@@ -88,6 +111,7 @@ def run_simulation(
     while timestep < max_steps:
         fault_injector.update(timestep, drone, environment)
         environment.update(timestep)
+        _skip_blocked_waypoints(environment, mission_manager, fsm, waypoint_count, timestep)
         drone.sense(environment)
 
         if mission_manager.get_current_target() != last_goal:
@@ -143,6 +167,7 @@ def run_simulation(
 
         drone.move(next_move)
         mission_manager.update(drone.position)
+        fsm.check_depleted_battery_abort(timestep, drone, mission_manager)
 
         dashboard.render(
             drone,
@@ -198,6 +223,7 @@ def run_simulation(
 
 
 def main() -> None:
+    """CLI entry: load config and run :func:`run_simulation`."""
     parser = argparse.ArgumentParser(description="Resilient Navigator mission simulator")
     default_config = Path(__file__).resolve().parent / "config" / "mission_01.json"
     parser.add_argument(
