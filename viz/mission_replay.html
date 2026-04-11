@@ -42,7 +42,7 @@
     .btn:hover { border-color: var(--nominal); color: var(--nominal); }
     #file-input-export, #file-input-config { display: none; }
     .landing-grid {
-      display: flex; flex-direction: column; gap: 1rem; max-width: 28rem; margin-top: 1.5rem; text-align: left;
+      display: flex; flex-direction: column; gap: 1rem; max-width: 36rem; margin-top: 1.5rem; text-align: left;
     }
     .landing-card {
       padding: 1rem 1.25rem; border: 1px solid var(--border); border-radius: 8px; background: var(--panel);
@@ -52,8 +52,8 @@
     .landing-card h2 { margin: 0 0 0.35rem 0; font-size: 1rem; color: var(--nominal); }
     .landing-card p { margin: 0; font-size: 0.85rem; color: var(--muted); }
     .titlebar-right { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
-    #algo-select, #algo-select-label { display: none; }
-    #algo-select.visible, #algo-select-label.visible { display: inline-block; }
+    #algo-select, #algo-select-label, #mission-select, #mission-select-label { display: none; }
+    #algo-select.visible, #algo-select-label.visible, #mission-select.visible, #mission-select-label.visible { display: inline-block; }
     #algo-select { font-size: 0.75rem; padding: 0.35rem 0.5rem; border-radius: 4px; background: var(--bg); color: var(--text); border: 1px solid var(--nominal); }
     #algo-select:disabled { opacity: 0.45; cursor: not-allowed; border-color: var(--border); }
     #compare-badge { font-size: 0.65rem; color: var(--muted); max-width: 420px; line-height: 1.3; }
@@ -64,6 +64,40 @@
     .compare-panel table { width: 100%; border-collapse: collapse; font-size: 0.75rem; font-family: ui-monospace, monospace; }
     .compare-panel th, .compare-panel td { padding: 0.35rem 0.5rem; border-bottom: 1px solid #252540; text-align: left; }
     .compare-panel th { color: var(--muted); }
+
+    .easy-open-panel {
+      max-width: 32rem; width: 100%; padding: 1rem 1.25rem; border: 1px solid var(--border); border-radius: 8px;
+      background: var(--panel); text-align: left;
+    }
+    .easy-open-panel > h2 {
+      margin: 0 0 0.35rem 0; font-size: 0.75rem; letter-spacing: 0.2em; color: var(--nominal); text-align: center;
+    }
+    .easy-open-panel > p { margin: 0 0 0.75rem 0; font-size: 0.85rem; color: var(--muted); }
+    .mission-preset-list { border: 1px solid var(--border); border-radius: 6px; overflow: hidden; background: #12122a; }
+    .mission-preset-row {
+      display: block; width: 100%; padding: 0.65rem 0.85rem; border: none; border-left: 3px solid transparent;
+      background: transparent; color: inherit; text-align: left; cursor: pointer;
+      font-family: inherit; border-bottom: 1px solid var(--border); transition: background 0.15s, border-color 0.15s;
+    }
+    .mission-preset-row:last-child { border-bottom: none; }
+    .mission-preset-row:hover {
+      background: rgba(0,255,136,0.08); border-left-color: var(--nominal);
+    }
+    .mission-preset-row .mp-name { font-weight: 600; font-size: 0.95rem; color: var(--text); display: block; }
+    .mission-preset-row .mp-sub { font-size: 0.78rem; color: var(--muted); margin-top: 0.2rem; display: block; line-height: 1.35; }
+    #mission-select { font-size: 0.75rem; padding: 0.35rem 0.5rem; border-radius: 4px; background: var(--bg); color: var(--text); border: 1px solid #4fc3f7; max-width: 11rem; }
+
+    .sim-busy {
+      position: fixed; inset: 0; z-index: 10000;
+      background: rgba(10, 10, 26, 0.88);
+      display: none; align-items: center; justify-content: center;
+      pointer-events: all;
+    }
+    .sim-busy.visible { display: flex; }
+    .sim-busy-inner {
+      padding: 1rem 2rem; background: var(--panel); border: 1px solid var(--nominal);
+      border-radius: 8px; color: var(--nominal); font-size: 1rem; letter-spacing: 0.12em;
+    }
 
     .app { display: none; flex-direction: column; min-height: 100vh; }
     .app.visible { display: flex; }
@@ -178,9 +212,10 @@
     <h1>Resilient Navigator</h1>
     <p style="max-width:36rem">Mission replay dashboard — run simulations in-browser or load a Python export.</p>
     <div class="landing-grid">
-      <div class="landing-card" id="card-easy" tabindex="0" role="button">
-        <h2>▶ Easy Open</h2>
-        <p>Run the embedded default mission in-browser (D* Lite + A* cached). No Python or file picker.</p>
+      <div class="easy-open-panel" id="easy-open-panel">
+        <h2>— EASY OPEN —</h2>
+        <p>Select a mission preset to simulate in-browser (D* Lite + A* cached). No Python.</p>
+        <div class="mission-preset-list" id="mission-preset-list" role="list"></div>
       </div>
       <div class="landing-card" id="card-export" tabindex="0" role="button">
         <h2>📂 Load exported JSON</h2>
@@ -195,10 +230,14 @@
     <input type="file" id="file-input-config" accept=".json,application/json" />
   </div>
 
+  <div class="sim-busy" id="sim-busy" aria-live="polite" aria-busy="true"><div class="sim-busy-inner">Simulating…</div></div>
+
   <div class="app" id="app">
     <div class="titlebar">
       <span><span class="accent">RESILIENT NAVIGATOR</span> — MISSION REPLAY</span>
       <div class="titlebar-right">
+        <label class="mono" id="mission-select-label" style="font-size:0.7rem;color:var(--muted);" for="mission-select">Mission</label>
+        <select id="mission-select" title="Switch mission preset (re-runs both planners)"></select>
         <label class="mono" id="algo-select-label" style="font-size:0.7rem;color:var(--muted);" for="algo-select">Planner</label>
         <select id="algo-select" title="Switch cached simulation (Easy Open / Custom Config only)">
           <option value="d_star_lite">D* Lite</option>
@@ -1486,14 +1525,18 @@
 (function () {
   'use strict';
 
-  /** Verbatim copy of config/mission_01.json (single-line JSON). */
-  var DEFAULT_MISSION_CONFIG = {"environment":{"grid_size":[80,80],"static_obstacles":[{"x":10,"y":10,"width":5,"height":3},{"x":30,"y":25,"width":4,"height":6}],"dynamic_hazards":[{"id":"hazard_01","type":"no_fly_zone","position":{"x":15,"y":15},"radius":7},{"id":"hazard_02","type":"obstacle_spawn","position":{"x":46,"y":38},"width":14,"height":12},{"id":"hazard_03","type":"obstacle_spawn","position":{"x":58,"y":45},"width":8,"height":12}]},"drone":{"start_position":[0,0],"speed":1.0,"sensor_range":10,"sensor_noise_baseline":0.05,"max_sensor_noise":0.5,"battery_capacity":1000,"battery_drain_rate":1.0},"mission":{"waypoints":[[10,5],[25,30],[35,15],[50,50],[60,35],[70,70]],"priority_weights":{"mission_completion":0.6,"safety":0.3,"energy_conservation":0.1},"home_position":[0,0]},"algorithm":{"primary_planner":"d_star_lite","secondary_planner":"a_star","replanning_trigger":"on_fault_or_hazard","replan_cooldown_steps":5,"sensor_degradation_threshold":0.3,"critical_fault_threshold":0.7},"fault_injection":{"schedule":[{"timestep":10,"type":"environmental_hazard","hazard_id":"hazard_01","description":"No-fly zone on path toward waypoint [25,30] (triggers REPLANNING)"},{"timestep":40,"type":"sensor_degradation","severity":0.4,"duration":30,"description":"GPS noise +40% (DEGRADED; expires at t=80)"},{"timestep":62,"type":"environmental_hazard","hazard_id":"hazard_02","description":"Obstacle field on path toward waypoint [60,35] (triggers REPLANNING)"},{"timestep":114,"type":"environmental_hazard","hazard_id":"hazard_03","description":"Obstacle field on path toward waypoint [70, 70] (triggers REPLANNING)"}]},"visualization":{"fps":10,"trail_length":50,"show_sensor_range":true,"show_planned_path":true,"dashboard_enabled":true}};
+  /** Embedded mission configs from config/mission_*.json */
+  const MISSION_PRESETS = {"mission_01":{"name":"Original","subtitle":"Balanced baseline \u2014 replanning + sensor degradation","config":{"environment":{"grid_size":[80,80],"static_obstacles":[{"x":10,"y":10,"width":5,"height":3},{"x":30,"y":25,"width":4,"height":6}],"dynamic_hazards":[{"id":"hazard_01","type":"no_fly_zone","position":{"x":15,"y":15},"radius":7},{"id":"hazard_02","type":"obstacle_spawn","position":{"x":46,"y":38},"width":14,"height":12},{"id":"hazard_03","type":"obstacle_spawn","position":{"x":58,"y":45},"width":8,"height":12}]},"drone":{"start_position":[0,0],"speed":1.0,"sensor_range":10,"sensor_noise_baseline":0.05,"max_sensor_noise":0.5,"battery_capacity":1000,"battery_drain_rate":1.0},"mission":{"waypoints":[[10,5],[25,30],[35,15],[50,50],[60,35],[70,70]],"priority_weights":{"mission_completion":0.6,"safety":0.3,"energy_conservation":0.1},"home_position":[0,0]},"algorithm":{"primary_planner":"d_star_lite","secondary_planner":"a_star","replanning_trigger":"on_fault_or_hazard","replan_cooldown_steps":5,"sensor_degradation_threshold":0.3,"critical_fault_threshold":0.7},"fault_injection":{"schedule":[{"timestep":10,"type":"environmental_hazard","hazard_id":"hazard_01","description":"No-fly zone on path toward waypoint [25,30] (triggers REPLANNING)"},{"timestep":40,"type":"sensor_degradation","severity":0.4,"duration":30,"description":"GPS noise +40% (DEGRADED; expires at t=80)"},{"timestep":62,"type":"environmental_hazard","hazard_id":"hazard_02","description":"Obstacle field on path toward waypoint [60,35] (triggers REPLANNING)"},{"timestep":114,"type":"environmental_hazard","hazard_id":"hazard_03","description":"Obstacle field on path toward waypoint [70, 70] (triggers REPLANNING)"}]},"visualization":{"fps":10,"trail_length":50,"show_sensor_range":true,"show_planned_path":true,"dashboard_enabled":true}}},"mission_02":{"name":"The Gauntlet","subtitle":"Dense obstacles, narrow corridors closing off","config":{"environment":{"grid_size":[80,80],"static_obstacles":[{"x":15,"y":0,"width":3,"height":30},{"x":35,"y":20,"width":3,"height":40},{"x":55,"y":10,"width":3,"height":35},{"x":15,"y":40,"width":20,"height":3},{"x":45,"y":55,"width":25,"height":3}],"dynamic_hazards":[{"id":"hazard_01","type":"obstacle_spawn","position":{"x":13,"y":30},"width":7,"height":5},{"id":"hazard_02","type":"no_fly_zone","position":{"x":36,"y":15},"radius":6},{"id":"hazard_03","type":"obstacle_spawn","position":{"x":53,"y":45},"width":7,"height":5}]},"drone":{"start_position":[5,5],"speed":1.0,"sensor_range":12,"sensor_noise_baseline":0.03,"max_sensor_noise":0.5,"battery_capacity":1200,"battery_drain_rate":1.0},"mission":{"waypoints":[[10,15],[25,35],[42,25],[50,50],[65,45],[75,75]],"priority_weights":{"mission_completion":0.7,"safety":0.2,"energy_conservation":0.1},"home_position":[5,5]},"algorithm":{"primary_planner":"d_star_lite","secondary_planner":"a_star","replanning_trigger":"on_fault_or_hazard","replan_cooldown_steps":3,"sensor_degradation_threshold":0.3,"critical_fault_threshold":0.7},"fault_injection":{"schedule":[{"timestep":20,"type":"environmental_hazard","hazard_id":"hazard_01","description":"Corridor between walls sealed off \u2014 forces long detour around wall gap"},{"timestep":55,"type":"environmental_hazard","hazard_id":"hazard_02","description":"No-fly zone blocks the gap in the second wall"},{"timestep":60,"type":"sensor_degradation","severity":0.35,"duration":25,"description":"Sensor degradation while navigating tight corridor (DEGRADED + REPLANNING overlap)"},{"timestep":100,"type":"environmental_hazard","hazard_id":"hazard_03","description":"Final corridor narrowed \u2014 tests replanning near mission end"}]},"visualization":{"fps":10,"trail_length":60,"show_sensor_range":true,"show_planned_path":true,"dashboard_enabled":true}}},"mission_03":{"name":"Sensor Blackout","subtitle":"Escalating sensor faults \u2192 SAFE_MODE","config":{"environment":{"grid_size":[80,80],"static_obstacles":[{"x":25,"y":25,"width":8,"height":8},{"x":60,"y":10,"width":5,"height":5}],"dynamic_hazards":[{"id":"hazard_01","type":"no_fly_zone","position":{"x":40,"y":40},"radius":6}]},"drone":{"start_position":[0,0],"speed":1.0,"sensor_range":15,"sensor_noise_baseline":0.05,"max_sensor_noise":0.8,"battery_capacity":800,"battery_drain_rate":1.2},"mission":{"waypoints":[[20,20],[40,35],[55,55],[70,70]],"priority_weights":{"mission_completion":0.3,"safety":0.6,"energy_conservation":0.1},"home_position":[0,0]},"algorithm":{"primary_planner":"d_star_lite","secondary_planner":"a_star","replanning_trigger":"on_fault_or_hazard","replan_cooldown_steps":5,"sensor_degradation_threshold":0.25,"critical_fault_threshold":0.6},"fault_injection":{"schedule":[{"timestep":15,"type":"sensor_degradation","severity":0.3,"duration":20,"description":"Moderate GPS interference \u2014 WARNING level (DEGRADED)"},{"timestep":50,"type":"environmental_hazard","hazard_id":"hazard_01","description":"No-fly zone appears mid-field while sensors are recovering"},{"timestep":70,"type":"sensor_degradation","severity":0.65,"duration":40,"description":"Severe GPS blackout \u2014 CRITICAL level (should trigger SAFE_MODE and return home)"},{"timestep":75,"type":"sensor_degradation","severity":0.1,"duration":100,"description":"Additional minor interference stacking on top of blackout"}]},"visualization":{"fps":10,"trail_length":40,"show_sensor_range":true,"show_planned_path":true,"dashboard_enabled":true}}},"mission_04":{"name":"Battery Race","subtitle":"Limited battery, energy conservation priority","config":{"environment":{"grid_size":[100,100],"static_obstacles":[{"x":20,"y":15,"width":10,"height":4},{"x":45,"y":30,"width":6,"height":15},{"x":70,"y":50,"width":8,"height":8},{"x":30,"y":60,"width":12,"height":4},{"x":80,"y":20,"width":4,"height":20}],"dynamic_hazards":[{"id":"hazard_01","type":"obstacle_spawn","position":{"x":35,"y":40},"width":15,"height":10},{"id":"hazard_02","type":"no_fly_zone","position":{"x":65,"y":70},"radius":10}]},"drone":{"start_position":[0,0],"speed":1.0,"sensor_range":10,"sensor_noise_baseline":0.05,"max_sensor_noise":0.5,"battery_capacity":450,"battery_drain_rate":1.5},"mission":{"waypoints":[[15,10],[35,35],[55,20],[75,45],[60,70],[90,90]],"priority_weights":{"mission_completion":0.3,"safety":0.2,"energy_conservation":0.5},"home_position":[0,0]},"algorithm":{"primary_planner":"d_star_lite","secondary_planner":"a_star","replanning_trigger":"on_fault_or_hazard","replan_cooldown_steps":5,"sensor_degradation_threshold":0.3,"critical_fault_threshold":0.7},"fault_injection":{"schedule":[{"timestep":40,"type":"environmental_hazard","hazard_id":"hazard_01","description":"Large obstacle field forces long detour \u2014 burns extra battery"},{"timestep":80,"type":"sensor_degradation","severity":0.35,"duration":30,"description":"Sensor degradation during energy-critical phase"},{"timestep":150,"type":"environmental_hazard","hazard_id":"hazard_02","description":"No-fly zone blocks direct path to final waypoint \u2014 will drone have enough battery?"}]},"visualization":{"fps":12,"trail_length":80,"show_sensor_range":true,"show_planned_path":true,"dashboard_enabled":true}}},"mission_05":{"name":"Cascade Failure","subtitle":"Rapid-fire compounding faults","config":{"environment":{"grid_size":[80,80],"static_obstacles":[{"x":20,"y":20,"width":6,"height":6},{"x":50,"y":15,"width":5,"height":10}],"dynamic_hazards":[{"id":"hazard_01","type":"no_fly_zone","position":{"x":12,"y":8},"radius":5},{"id":"hazard_02","type":"obstacle_spawn","position":{"x":30,"y":28},"width":12,"height":8},{"id":"hazard_03","type":"no_fly_zone","position":{"x":48,"y":42},"radius":8},{"id":"hazard_04","type":"obstacle_spawn","position":{"x":60,"y":55},"width":10,"height":10}]},"drone":{"start_position":[2,2],"speed":1.0,"sensor_range":10,"sensor_noise_baseline":0.05,"max_sensor_noise":0.5,"battery_capacity":900,"battery_drain_rate":1.0},"mission":{"waypoints":[[10,10],[30,20],[45,40],[60,50],[72,72]],"priority_weights":{"mission_completion":0.5,"safety":0.4,"energy_conservation":0.1},"home_position":[2,2]},"algorithm":{"primary_planner":"d_star_lite","secondary_planner":"a_star","replanning_trigger":"on_fault_or_hazard","replan_cooldown_steps":2,"sensor_degradation_threshold":0.3,"critical_fault_threshold":0.7},"fault_injection":{"schedule":[{"timestep":8,"type":"environmental_hazard","hazard_id":"hazard_01","description":"No-fly zone near first waypoint \u2014 immediate replan needed"},{"timestep":12,"type":"sensor_degradation","severity":0.3,"duration":15,"description":"Sensor hit while still recovering from first replan (DEGRADED)"},{"timestep":30,"type":"environmental_hazard","hazard_id":"hazard_02","description":"Obstacle field drops while approaching waypoint 2"},{"timestep":33,"type":"sensor_degradation","severity":0.45,"duration":20,"description":"Severe sensor hit during active replan \u2014 DEGRADED + REPLANNING overlap"},{"timestep":65,"type":"environmental_hazard","hazard_id":"hazard_03","description":"Large no-fly zone blocks path to waypoint 4"},{"timestep":68,"type":"sensor_degradation","severity":0.25,"duration":10,"description":"Minor sensor degradation stacking on hazard replan"},{"timestep":100,"type":"environmental_hazard","hazard_id":"hazard_04","description":"Final obstacle field near destination \u2014 can the drone find a way through?"}]},"visualization":{"fps":10,"trail_length":50,"show_sensor_range":true,"show_planned_path":true,"dashboard_enabled":true}}},"mission_06":{"name":"Return to Base","subtitle":"Forced abort, navigate home through hazards","config":{"environment":{"grid_size":[80,80],"static_obstacles":[{"x":10,"y":35,"width":20,"height":3},{"x":40,"y":10,"width":3,"height":25},{"x":55,"y":40,"width":10,"height":3}],"dynamic_hazards":[{"id":"hazard_01","type":"obstacle_spawn","position":{"x":22,"y":18},"width":10,"height":8},{"id":"hazard_02","type":"no_fly_zone","position":{"x":15,"y":20},"radius":8},{"id":"hazard_03","type":"obstacle_spawn","position":{"x":5,"y":10},"width":8,"height":12}]},"drone":{"start_position":[0,0],"speed":1.0,"sensor_range":12,"sensor_noise_baseline":0.05,"max_sensor_noise":0.8,"battery_capacity":1000,"battery_drain_rate":1.0},"mission":{"waypoints":[[20,15],[35,30],[50,20],[65,50],[75,75]],"priority_weights":{"mission_completion":0.2,"safety":0.7,"energy_conservation":0.1},"home_position":[0,0]},"algorithm":{"primary_planner":"d_star_lite","secondary_planner":"a_star","replanning_trigger":"on_fault_or_hazard","replan_cooldown_steps":5,"sensor_degradation_threshold":0.2,"critical_fault_threshold":0.55},"fault_injection":{"schedule":[{"timestep":15,"type":"environmental_hazard","hazard_id":"hazard_01","description":"Obstacle blocks direct path to waypoint 2 \u2014 minor replan"},{"timestep":40,"type":"sensor_degradation","severity":0.55,"duration":100,"description":"Critical sensor failure \u2014 exceeds critical_fault_threshold of 0.55 (SAFE_MODE, abort to home)"},{"timestep":50,"type":"environmental_hazard","hazard_id":"hazard_02","description":"No-fly zone appears on the return path home \u2014 must replan route back"},{"timestep":65,"type":"environmental_hazard","hazard_id":"hazard_03","description":"Obstacle near home base \u2014 return path gets even harder"}]},"visualization":{"fps":10,"trail_length":70,"show_sensor_range":true,"show_planned_path":true,"dashboard_enabled":true}}}};
+
+  var PRESET_ORDER = ['mission_01', 'mission_02', 'mission_03', 'mission_04', 'mission_05', 'mission_06'];
+
 
   var DATA = null;
   var CACHED_DS = null;
   var CACHED_AS = null;
-  /** 'export' = single Python JSON; 'dual' = both in-browser runs cached */
-  var dataMode = 'export';
+  /** 'export' | 'preset' (Easy Open) | 'custom' (loaded mission JSON) */
+  var loadMode = 'export';
+  var currentPresetId = null;
   var currentAlgo = 'd_star_lite';
   var idx = 0;
   var playing = false;
@@ -1504,6 +1547,7 @@
   var algoDiffFrames = 0;
   var algoDiffOldPath = null;
   var resizeBound = false;
+  var suppressMissionSelectEvent = false;
 
   var FSM_COL = {
     NOMINAL: '#00ff88',
@@ -1550,52 +1594,143 @@
     return s;
   }
 
+  function hasDualCache() {
+    return !!(CACHED_DS && CACHED_AS);
+  }
+
+  function showSimBusy() {
+    var el = $('sim-busy');
+    if (el) el.classList.add('visible');
+  }
+
+  function hideSimBusy() {
+    var el = $('sim-busy');
+    if (el) el.classList.remove('visible');
+  }
+
+  function updateChromeVisibility() {
+    var preset = loadMode === 'preset';
+    var dual = hasDualCache() && loadMode !== 'export';
+    var ms = $('mission-select');
+    var msl = $('mission-select-label');
+    if (ms) {
+      ms.classList.toggle('visible', preset);
+      ms.disabled = !preset;
+    }
+    if (msl) msl.classList.toggle('visible', preset);
+    $('algo-select').classList.toggle('visible', dual);
+    $('algo-select-label').classList.toggle('visible', dual);
+    $('algo-select').disabled = !dual;
+    if (!dual) {
+      $('algo-select').title = 'Algorithm switching requires a cached in-browser run.';
+    } else {
+      $('algo-select').title = 'Switch cached simulation (instant)';
+    }
+    $('compare-panel').style.display = dual ? '' : 'none';
+    if (!dual) $('compare-badge').textContent = '';
+  }
+
+  function populateMissionDropdown(selectedKey) {
+    var sel = $('mission-select');
+    if (!sel) return;
+    sel.innerHTML = '';
+    PRESET_ORDER.forEach(function (key) {
+      var p = MISSION_PRESETS[key];
+      if (!p) return;
+      var opt = document.createElement('option');
+      opt.value = key;
+      opt.textContent = p.name;
+      sel.appendChild(opt);
+    });
+    if (selectedKey && MISSION_PRESETS[selectedKey]) {
+      suppressMissionSelectEvent = true;
+      sel.value = selectedKey;
+      suppressMissionSelectEvent = false;
+    }
+  }
+
+  function buildLandingPresetList() {
+    var box = $('mission-preset-list');
+    if (!box) return;
+    box.innerHTML = '';
+    PRESET_ORDER.forEach(function (key) {
+      var p = MISSION_PRESETS[key];
+      if (!p) return;
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'mission-preset-row';
+      btn.setAttribute('role', 'listitem');
+      btn.innerHTML = '<span class="mp-name">▶ ' + p.name + '</span><span class="mp-sub">' + p.subtitle + '</span>';
+      btn.onclick = function () {
+        runDualSimulationsAndOpen(p.config, { loadMode: 'preset', presetId: key });
+      };
+      box.appendChild(btn);
+    });
+  }
+
   function openExportData(d) {
     DATA = d;
     idx = 0;
     CACHED_DS = CACHED_AS = null;
-    dataMode = 'export';
+    loadMode = 'export';
+    currentPresetId = null;
     currentAlgo = (d.metadata && d.metadata.planner_used && /a\s*\*/i.test(String(d.metadata.planner_used))) ? 'a_star' : 'd_star_lite';
     $('landing').style.display = 'none';
     $('app').classList.add('visible');
-    $('algo-select').classList.remove('visible');
-    $('algo-select-label').classList.remove('visible');
-    $('algo-select').disabled = true;
-    $('algo-select').title = 'Algorithm switching requires Easy Open or Custom Config mode.';
-    $('compare-panel').style.display = 'none';
-    $('compare-badge').textContent = '';
+    updateChromeVisibility();
     initApp();
   }
 
-  function runDualSimulationsAndOpen(cfg) {
+  function runDualSimulationsAndOpen(cfg, opts) {
+    opts = opts || {};
+    var lm = opts.loadMode != null ? opts.loadMode : 'custom';
+    var pid = opts.presetId != null ? opts.presetId : null;
+
     if (!window.RNSim || typeof window.RNSim.runSimulation !== 'function') {
-      alert('Simulation engine (simulation_engine.js) failed to load.');
+      alert('Simulation engine failed to load.');
       return;
     }
-    var maxSteps = 2500;
-    var t0 = performance.now();
-    CACHED_DS = window.RNSim.runSimulation(cfg, 'd_star_lite', maxSteps);
-    CACHED_AS = window.RNSim.runSimulation(cfg, 'a_star', maxSteps);
-    if (performance.now() - t0 > 2000) console.warn('In-browser simulation took longer than 2s');
-    idx = 0;
-    DATA = CACHED_DS;
-    dataMode = 'dual';
-    currentAlgo = 'd_star_lite';
-    $('landing').style.display = 'none';
-    $('app').classList.add('visible');
-    $('algo-select').classList.add('visible');
-    $('algo-select-label').classList.add('visible');
-    $('algo-select').disabled = false;
-    $('algo-select').value = 'd_star_lite';
-    $('algo-select').title = 'Switch cached simulation (instant)';
-    $('compare-panel').style.display = '';
-    initApp();
-    fillComparePanel();
-    updateCompareBadge();
+
+    playing = false;
+    $('pb-play').textContent = '▶ Play';
+
+    showSimBusy();
+    setTimeout(function () {
+      try {
+        var maxSteps = 6000;
+        var t0 = performance.now();
+        CACHED_DS = window.RNSim.runSimulation(cfg, 'd_star_lite', maxSteps);
+        CACHED_AS = window.RNSim.runSimulation(cfg, 'a_star', maxSteps);
+        if (performance.now() - t0 > 2000) console.warn('In-browser simulation took longer than 2s');
+        idx = 0;
+        DATA = CACHED_DS;
+        loadMode = lm;
+        currentPresetId = pid;
+        currentAlgo = 'd_star_lite';
+        $('algo-select').value = 'd_star_lite';
+        if (pid) populateMissionDropdown(pid);
+        $('landing').style.display = 'none';
+        $('app').classList.add('visible');
+        updateChromeVisibility();
+        initApp();
+        fillComparePanel();
+        updateCompareBadge();
+      } catch (err) {
+        console.error(err);
+        alert('Simulation error: ' + (err && err.message ? err.message : String(err)));
+      } finally {
+        hideSimBusy();
+      }
+    }, 0);
+  }
+
+  function switchMissionPreset(presetKey) {
+    if (loadMode !== 'preset' || !MISSION_PRESETS[presetKey]) return;
+    runDualSimulationsAndOpen(MISSION_PRESETS[presetKey].config, { loadMode: 'preset', presetId: presetKey });
   }
 
   function switchPlanner(kind) {
-    if (dataMode !== 'dual' || !CACHED_DS || !CACHED_AS) return;
+    if (!hasDualCache() || loadMode === 'export') return;
     if (kind !== 'd_star_lite' && kind !== 'a_star') return;
     playing = false;
     $('pb-play').textContent = '▶ Play';
@@ -1621,7 +1756,7 @@
 
   function fillComparePanel() {
     var tb = $('compare-tbody');
-    if (!tb || dataMode !== 'dual' || !CACHED_DS || !CACHED_AS) return;
+    if (!tb || !hasDualCache() || loadMode === 'export') return;
     var ds = CACHED_DS;
     var ast = CACHED_AS;
     var mdD = ds.metadata;
@@ -1673,7 +1808,7 @@
 
   function updateCompareBadge() {
     var el = $('compare-badge');
-    if (!el || dataMode !== 'dual' || !CACHED_DS || !CACHED_AS) { if (el) el.textContent = ''; return; }
+    if (!el || !hasDualCache() || loadMode === 'export') { if (el) el.textContent = ''; return; }
     var mdD = CACHED_DS.metadata;
     var mdA = CACHED_AS.metadata;
     var nD = mdD.total_replans != null ? mdD.total_replans : '?';
@@ -1698,13 +1833,10 @@
     r.onload = function () {
       var d = parseJSON(r.result);
       if (!d || !isMissionConfig(d)) { alert('Expected a mission config JSON (environment, mission, …).'); return; }
-      runDualSimulationsAndOpen(d);
+      runDualSimulationsAndOpen(d, { loadMode: 'custom', presetId: null });
     };
     r.readAsText(file);
   }
-
-  $('card-easy').onclick = function () { runDualSimulationsAndOpen(DEFAULT_MISSION_CONFIG); };
-  $('card-easy').onkeydown = function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); $('card-easy').click(); } };
 
   $('card-export').onclick = function () { $('file-input-export').click(); };
   $('card-export').onkeydown = function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); $('card-export').click(); } };
@@ -1725,16 +1857,25 @@
 
   $('algo-select').onchange = function () { switchPlanner(this.value); };
 
+  $('mission-select').onchange = function () {
+    if (suppressMissionSelectEvent || loadMode !== 'preset') return;
+    switchMissionPreset(this.value);
+  };
+
   $('btn-reload').onclick = function () {
-    if (dataMode === 'dual') {
+    if (loadMode === 'preset' || loadMode === 'custom') {
       if (!confirm('Return to the start screen? Cached simulations will be cleared.')) return;
     }
     $('app').classList.remove('visible');
     $('landing').style.display = 'flex';
     DATA = null;
     CACHED_DS = CACHED_AS = null;
-    dataMode = 'export';
+    loadMode = 'export';
+    currentPresetId = null;
   };
+
+  populateMissionDropdown('mission_01');
+  buildLandingPresetList();
 
   function initApp() {
     playing = false;
@@ -1778,7 +1919,7 @@
     var tb = $('fsm-tbody');
     tb.innerHTML = '';
     var otherLog = null;
-    if (dataMode === 'dual' && CACHED_DS && CACHED_AS) {
+    if (hasDualCache() && loadMode !== 'export') {
       otherLog = (DATA === CACHED_AS) ? CACHED_DS.fsm_transition_log : CACHED_AS.fsm_transition_log;
     }
     (DATA.fsm_transition_log || []).forEach(function (e, rowi) {
@@ -1870,7 +2011,7 @@
     var gw = DATA.environment.grid_size[0];
     var gh = DATA.environment.grid_size[1];
     var maxW = Math.min(wrap.clientWidth || 800, window.innerWidth * 0.62);
-    var maxH = window.innerHeight * 0.55;
+    var maxH = window.innerHeight * 0.75;
     var cs = Math.min(maxW / gw, maxH / gh, 14);
     var dpr = window.devicePixelRatio || 1;
     var c = $('grid-canvas');
@@ -2377,7 +2518,7 @@
       var d = parseJSON(r.result);
       if (!d) return;
       if (isExportDocument(d)) openExportData(d);
-      else if (isMissionConfig(d)) runDualSimulationsAndOpen(d);
+      else if (isMissionConfig(d)) runDualSimulationsAndOpen(d, { loadMode: 'custom', presetId: null });
       else alert('Unrecognized JSON: need either an exported simulation or a mission config.');
     };
     r.readAsText(f);

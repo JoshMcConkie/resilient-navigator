@@ -1,0 +1,148 @@
+{
+  "environment": {
+    "grid_size": [
+      80,
+      80
+    ],
+    "static_obstacles": [
+      {
+        "x": 10,
+        "y": 35,
+        "width": 20,
+        "height": 3
+      },
+      {
+        "x": 40,
+        "y": 10,
+        "width": 3,
+        "height": 25
+      },
+      {
+        "x": 55,
+        "y": 40,
+        "width": 10,
+        "height": 3
+      }
+    ],
+    "dynamic_hazards": [
+      {
+        "id": "hazard_01",
+        "type": "obstacle_spawn",
+        "position": {
+          "x": 22,
+          "y": 18
+        },
+        "width": 10,
+        "height": 8
+      },
+      {
+        "id": "hazard_02",
+        "type": "no_fly_zone",
+        "position": {
+          "x": 15,
+          "y": 20
+        },
+        "radius": 8
+      },
+      {
+        "id": "hazard_03",
+        "type": "obstacle_spawn",
+        "position": {
+          "x": 5,
+          "y": 10
+        },
+        "width": 8,
+        "height": 12
+      }
+    ]
+  },
+  "drone": {
+    "start_position": [
+      0,
+      0
+    ],
+    "speed": 1.0,
+    "sensor_range": 12,
+    "sensor_noise_baseline": 0.05,
+    "max_sensor_noise": 0.8,
+    "battery_capacity": 1000,
+    "battery_drain_rate": 1.0
+  },
+  "mission": {
+    "waypoints": [
+      [
+        20,
+        15
+      ],
+      [
+        35,
+        30
+      ],
+      [
+        50,
+        20
+      ],
+      [
+        65,
+        50
+      ],
+      [
+        75,
+        75
+      ]
+    ],
+    "priority_weights": {
+      "mission_completion": 0.2,
+      "safety": 0.7,
+      "energy_conservation": 0.1
+    },
+    "home_position": [
+      0,
+      0
+    ]
+  },
+  "algorithm": {
+    "primary_planner": "d_star_lite",
+    "secondary_planner": "a_star",
+    "replanning_trigger": "on_fault_or_hazard",
+    "replan_cooldown_steps": 5,
+    "sensor_degradation_threshold": 0.2,
+    "critical_fault_threshold": 0.55
+  },
+  "fault_injection": {
+    "schedule": [
+      {
+        "timestep": 15,
+        "type": "environmental_hazard",
+        "hazard_id": "hazard_01",
+        "description": "Obstacle blocks direct path to waypoint 2 \u2014 minor replan"
+      },
+      {
+        "timestep": 40,
+        "type": "sensor_degradation",
+        "severity": 0.55,
+        "duration": 100,
+        "description": "Critical sensor failure \u2014 exceeds critical_fault_threshold of 0.55 (SAFE_MODE, abort to home)"
+      },
+      {
+        "timestep": 45,
+        "type": "environmental_hazard",
+        "hazard_id": "hazard_02",
+        "description": "No-fly zone appears on the return path home \u2014 must replan route back"
+      },
+      {
+        "timestep": 65,
+        "type": "environmental_hazard",
+        "hazard_id": "hazard_03",
+        "description": "Obstacle near home base \u2014 return path gets even harder"
+      }
+    ]
+  },
+  "visualization": {
+    "fps": 10,
+    "trail_length": 70,
+    "show_sensor_range": true,
+    "show_planned_path": true,
+    "dashboard_enabled": true
+  }
+}

@@ -1,0 +1,120 @@
+{
+  "environment": {
+    "grid_size": [
+      80,
+      80
+    ],
+    "static_obstacles": [
+      {
+        "x": 25,
+        "y": 25,
+        "width": 8,
+        "height": 8
+      },
+      {
+        "x": 60,
+        "y": 10,
+        "width": 5,
+        "height": 5
+      }
+    ],
+    "dynamic_hazards": [
+      {
+        "id": "hazard_01",
+        "type": "no_fly_zone",
+        "position": {
+          "x": 40,
+          "y": 40
+        },
+        "radius": 6
+      }
+    ]
+  },
+  "drone": {
+    "start_position": [
+      0,
+      0
+    ],
+    "speed": 1.0,
+    "sensor_range": 15,
+    "sensor_noise_baseline": 0.05,
+    "max_sensor_noise": 0.8,
+    "battery_capacity": 800,
+    "battery_drain_rate": 1.2
+  },
+  "mission": {
+    "waypoints": [
+      [
+        20,
+        20
+      ],
+      [
+        40,
+        35
+      ],
+      [
+        55,
+        55
+      ],
+      [
+        70,
+        70
+      ]
+    ],
+    "priority_weights": {
+      "mission_completion": 0.3,
+      "safety": 0.6,
+      "energy_conservation": 0.1
+    },
+    "home_position": [
+      0,
+      0
+    ]
+  },
+  "algorithm": {
+    "primary_planner": "d_star_lite",
+    "secondary_planner": "a_star",
+    "replanning_trigger": "on_fault_or_hazard",
+    "replan_cooldown_steps": 5,
+    "sensor_degradation_threshold": 0.25,
+    "critical_fault_threshold": 0.6
+  },
+  "fault_injection": {
+    "schedule": [
+      {
+        "timestep": 15,
+        "type": "sensor_degradation",
+        "severity": 0.3,
+        "duration": 20,
+        "description": "Moderate GPS interference \u2014 WARNING level (DEGRADED)"
+      },
+      {
+        "timestep": 50,
+        "type": "environmental_hazard",
+        "hazard_id": "hazard_01",
+        "description": "No-fly zone appears mid-field while sensors are recovering"
+      },
+      {
+        "timestep": 70,
+        "type": "sensor_degradation",
+        "severity": 0.65,
+        "duration": 40,
+        "description": "Severe GPS blackout \u2014 CRITICAL level (should trigger SAFE_MODE and return home)"
+      },
+      {
+        "timestep": 75,
+        "type": "sensor_degradation",
+        "severity": 0.1,
+        "duration": 100,
+        "description": "Additional minor interference stacking on top of blackout"
+      }
+    ]
+  },
+  "visualization": {
+    "fps": 10,
+    "trail_length": 40,
+    "show_sensor_range": true,
+    "show_planned_path": true,
+    "dashboard_enabled": true
+  }
+}

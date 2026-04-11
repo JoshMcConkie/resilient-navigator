@@ -1,0 +1,148 @@
+{
+  "environment": {
+    "grid_size": [
+      100,
+      100
+    ],
+    "static_obstacles": [
+      {
+        "x": 20,
+        "y": 15,
+        "width": 10,
+        "height": 4
+      },
+      {
+        "x": 45,
+        "y": 30,
+        "width": 6,
+        "height": 15
+      },
+      {
+        "x": 70,
+        "y": 50,
+        "width": 8,
+        "height": 8
+      },
+      {
+        "x": 30,
+        "y": 60,
+        "width": 12,
+        "height": 4
+      },
+      {
+        "x": 80,
+        "y": 20,
+        "width": 4,
+        "height": 20
+      }
+    ],
+    "dynamic_hazards": [
+      {
+        "id": "hazard_01",
+        "type": "obstacle_spawn",
+        "position": {
+          "x": 35,
+          "y": 40
+        },
+        "width": 15,
+        "height": 10
+      },
+      {
+        "id": "hazard_02",
+        "type": "no_fly_zone",
+        "position": {
+          "x": 65,
+          "y": 70
+        },
+        "radius": 10
+      }
+    ]
+  },
+  "drone": {
+    "start_position": [
+      0,
+      0
+    ],
+    "speed": 1.0,
+    "sensor_range": 10,
+    "sensor_noise_baseline": 0.05,
+    "max_sensor_noise": 0.5,
+    "battery_capacity": 450,
+    "battery_drain_rate": 1.5
+  },
+  "mission": {
+    "waypoints": [
+      [
+        15,
+        10
+      ],
+      [
+        35,
+        35
+      ],
+      [
+        55,
+        20
+      ],
+      [
+        75,
+        45
+      ],
+      [
+        60,
+        70
+      ],
+      [
+        90,
+        90
+      ]
+    ],
+    "priority_weights": {
+      "mission_completion": 0.3,
+      "safety": 0.2,
+      "energy_conservation": 0.5
+    },
+    "home_position": [
+      0,
+      0
+    ]
+  },
+  "algorithm": {
+    "primary_planner": "d_star_lite",
+    "secondary_planner": "a_star",
+    "replanning_trigger": "on_fault_or_hazard",
+    "replan_cooldown_steps": 5,
+    "sensor_degradation_threshold": 0.3,
+    "critical_fault_threshold": 0.7
+  },
+  "fault_injection": {
+    "schedule": [
+      {
+        "timestep": 40,
+        "type": "environmental_hazard",
+        "hazard_id": "hazard_01",
+        "description": "Large obstacle field forces long detour \u2014 burns extra battery"
+      },
+      {
+        "timestep": 80,
+        "type": "sensor_degradation",
+        "severity": 0.35,
+        "duration": 30,
+        "description": "Sensor degradation during energy-critical phase"
+      },
+      {
+        "timestep": 150,
+        "type": "environmental_hazard",
+        "hazard_id": "hazard_02",
+        "description": "No-fly zone blocks direct path to final waypoint \u2014 will drone have enough battery?"
+      }
+    ]
+  },
+  "visualization": {
+    "fps": 12,
+    "trail_length": 80,
+    "show_sensor_range": true,
+    "show_planned_path": true,
+    "dashboard_enabled": true
+  }
+}
