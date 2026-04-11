@@ -30,6 +30,8 @@ class Drone:
         gw, gh = config["environment"]["grid_size"]
         self._grid_width: int = int(gw)
         self._grid_height: int = int(gh)
+        # Caution / FSM: scales battery drain per move (1.0 = nominal).
+        self._speed_scale: float = 1.0
 
     def sense(self, environment: Environment) -> dict[str, Any]:
         """Local observation within sensor_range, corrupted by sensor_noise_level."""
@@ -85,7 +87,8 @@ class Drone:
         self.position = best
         self.velocity = (float(dx), float(dy))
         self.heading = math.atan2(dy, dx)
-        self.battery = max(0.0, self.battery - self._battery_drain_rate)
+        drain = self._battery_drain_rate * self._speed_scale
+        self.battery = max(0.0, self.battery - drain)
 
     def apply_sensor_degradation(self, severity: float) -> None:
         self.sensor_noise_level = min(
@@ -99,6 +102,10 @@ class Drone:
             self.sensor_noise_level - float(amount),
         )
 
+    def set_speed_scale(self, scale: float) -> None:
+        """Reduce energy use / notional speed when FSM is in DEGRADED (clamped to [0.1, 1.0])."""
+        self._speed_scale = max(0.1, min(1.0, float(scale)))
+
     def get_telemetry(self) -> dict[str, Any]:
         return {
             "position": self.position,
@@ -109,4 +116,5 @@ class Drone:
             "heading": self.heading,
             "speed": self._speed,
             "battery_capacity": self._battery_capacity,
+            "speed_scale": self._speed_scale,
         }

@@ -1,0 +1,165 @@
+{
+    "tests": [
+        {
+            "score": 0,
+            "max_score": 0,
+            "name": "tests/test_faults_fsm.py::test_fault_injector_sensor_at_timestep",
+            "output": "\n",
+            "visibility": "visible"
+        },
+        {
+            "score": 0,
+            "max_score": 0,
+            "name": "tests/test_faults_fsm.py::test_fault_injector_sensor_restores_after_duration",
+            "output": "\n",
+            "visibility": "visible"
+        },
+        {
+            "score": 0,
+            "max_score": 0,
+            "name": "tests/test_faults_fsm.py::test_fault_injector_environmental_hazard_grid",
+            "output": "\n",
+            "visibility": "visible"
+        },
+        {
+            "score": 0,
+            "max_score": 0,
+            "name": "tests/test_faults_fsm.py::test_detector_nominal",
+            "output": "\n",
+            "visibility": "visible"
+        },
+        {
+            "score": 0,
+            "max_score": 0,
+            "name": "tests/test_faults_fsm.py::test_detector_warning",
+            "output": "\n",
+            "visibility": "visible"
+        },
+        {
+            "score": 0,
+            "max_score": 0,
+            "name": "tests/test_faults_fsm.py::test_detector_critical",
+            "output": "\n",
+            "visibility": "visible"
+        },
+        {
+            "score": 0,
+            "max_score": 0,
+            "name": "tests/test_faults_fsm.py::test_detector_path_blocked",
+            "output": "\n",
+            "visibility": "visible"
+        },
+        {
+            "score": 0,
+            "max_score": 0,
+            "name": "tests/test_faults_fsm.py::test_fsm_nominal_start",
+            "output": "\n",
+            "visibility": "visible"
+        },
+        {
+            "score": 0,
+            "max_score": 0,
+            "name": "tests/test_faults_fsm.py::test_fsm_nominal_to_degraded",
+            "output": "\n",
+            "visibility": "visible"
+        },
+        {
+            "score": 0,
+            "max_score": 0,
+            "name": "tests/test_faults_fsm.py::test_fsm_nominal_to_replanning_path_blocked",
+            "output": "\n",
+            "visibility": "visible"
+        },
+        {
+            "score": 0,
+            "max_score": 0,
+            "name": "tests/test_faults_fsm.py::test_fsm_degraded_to_safe_critical",
+            "output": "\n",
+            "visibility": "visible"
+        },
+        {
+            "score": 0,
+            "max_score": 0,
+            "name": "tests/test_faults_fsm.py::test_fsm_replan_sets_flag",
+            "output": "\n",
+            "visibility": "visible"
+        },
+        {
+            "score": 0,
+            "max_score": 0,
+            "name": "tests/test_faults_fsm.py::test_fsm_transition_log",
+            "output": "\n",
+            "visibility": "visible"
+        },
+        {
+            "score": 0,
+            "max_score": 0,
+            "name": "tests/test_faults_fsm.py::test_integration_loop_150_steps_observes_faults",
+            "output": "\n",
+            "visibility": "visible"
+        },
+        {
+            "score": 0,
+            "max_score": 0,
+            "name": "tests/test_faults_fsm.py::test_fsm_replan_succeeded_nominal",
+            "output": "\n",
+            "visibility": "visible"
+        },
+        {
+            "score": 0,
+            "max_score": 0,
+            "name": "tests/test_planners.py::test_base_planner_is_abstract",
+            "output": "\n",
+            "visibility": "visible"
+        },
+        {
+            "score": 0,
+            "max_score": 0,
+            "name": "tests/test_planners.py::test_d_star_initial_path_avoids_static_obstacles",
+            "output": "\n",
+            "visibility": "visible"
+        },
+        {
+            "score": 0,
+            "max_score": 0,
+            "name": "tests/test_planners.py::test_mission_01_first_waypoint_path_valid",
+            "output": "\n",
+            "visibility": "visible"
+        },
+        {
+            "score": 0,
+            "max_score": 0,
+            "name": "tests/test_planners.py::test_replan_avoids_new_obstacle_without_full_reinit",
+            "output": "\n",
+            "visibility": "visible"
+        },
+        {
+            "score": 0,
+            "max_score": 0,
+            "name": "tests/test_planners.py::test_get_next_step_along_path",
+            "output": "\n",
+            "visibility": "visible"
+        },
+        {
+            "score": 0,
+            "max_score": 0,
+            "name": "tests/test_planners.py::test_get_full_path_returns_tuples",
+            "output": "\n",
+            "visibility": "visible"
+        },
+        {
+            "score": 0,
+            "max_score": 0,
+            "name": "tests/test_planners.py::test_blocked_start_raises",
+            "output": "\n",
+            "visibility": "visible"
+        },
+        {
+            "score": 0,
+            "max_score": 0,
+            "name": "tests/test_planners.py::test_planner_name",
+            "output": "\n",
+            "visibility": "visible"
+        }
+    ]
+}

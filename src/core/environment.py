@@ -21,6 +21,8 @@ class Environment:
         gw, gh = int(env_cfg["grid_size"][0]), int(env_cfg["grid_size"][1])
         self._width, self._height = gw, gh
         self._grid = np.zeros((gh, gw), dtype=np.int8)
+        # Last timestep passed to update(); used with get_changes_since for incremental planners.
+        self._current_timestep: int = -1
         self._dynamic_hazards: list[dict[str, Any]] = list(env_cfg.get("dynamic_hazards", []))
         self._triggered_ids: set[str] = set()
         self._change_events: list[tuple[int, list[tuple[int, int]]]] = []
@@ -61,8 +63,30 @@ class Environment:
         for x, y in cells:
             self._grid[y, x] = value
 
+    def _apply_dynamic_hazard(self, hz: dict[str, Any]) -> list[tuple[int, int]]:
+        """Paint grid cells for one hazard entry; returns changed cell list."""
+        htype = hz["type"]
+        pos = hz["position"]
+        px, py = int(pos["x"]), int(pos["y"])
+        changed: list[tuple[int, int]] = []
+        if htype == "no_fly_zone":
+            cells = self._disk_cells(px, py, float(hz["radius"]))
+            for x, y in cells:
+                self._grid[y, x] = HAZARD
+            changed.extend(cells)
+        elif htype == "obstacle_spawn":
+            rect = {"x": px, "y": py, "width": int(hz["width"]), "height": int(hz["height"])}
+            cells = self._fill_rectangle_cells(rect)
+            for x, y in cells:
+                self._grid[y, x] = OBSTACLE
+            changed.extend(cells)
+        else:
+            raise ValueError(f"Unknown dynamic hazard type: {htype}")
+        return changed
+
     def update(self, timestep: int) -> None:
         """Activate dynamic hazards whose trigger_timestep matches."""
+        self._current_timestep = timestep
         changed: list[tuple[int, int]] = []
         for hz in self._dynamic_hazards:
             hid = str(hz["id"])
@@ -71,25 +95,39 @@ class Environment:
             if int(hz["trigger_timestep"]) != timestep:
                 continue
             self._triggered_ids.add(hid)
-            htype = hz["type"]
-            pos = hz["position"]
-            px, py = int(pos["x"]), int(pos["y"])
-            if htype == "no_fly_zone":
-                cells = self._disk_cells(px, py, float(hz["radius"]))
-                for x, y in cells:
-                    self._grid[y, x] = HAZARD
-                changed.extend(cells)
-            elif htype == "obstacle_spawn":
-                rect = {"x": px, "y": py, "width": int(hz["width"]), "height": int(hz["height"])}
-                cells = self._fill_rectangle_cells(rect)
-                for x, y in cells:
-                    self._grid[y, x] = OBSTACLE
-                changed.extend(cells)
-            else:
-                raise ValueError(f"Unknown dynamic hazard type: {htype}")
+            changed.extend(self._apply_dynamic_hazard(hz))
 
         if changed:
             self._change_events.append((timestep, changed))
+
+    def trigger_dynamic_hazard_by_id(
+        self,
+        hazard_id: str,
+        *,
+        event_timestep: int | None = None,
+    ) -> bool:
+        """
+        Activate a configured dynamic hazard by id (e.g. fault injection schedule).
+        Idempotent: returns False if already triggered or id not found.
+        ``event_timestep`` is used for :meth:`get_changes_since` when the caller runs
+        before :meth:`update` (e.g. fault injector on the same simulation tick).
+        """
+        for hz in self._dynamic_hazards:
+            if str(hz["id"]) != str(hazard_id):
+                continue
+            hid = str(hz["id"])
+            if hid in self._triggered_ids:
+                return False
+            self._triggered_ids.add(hid)
+            cells = self._apply_dynamic_hazard(hz)
+            if event_timestep is not None:
+                t = int(event_timestep)
+            else:
+                t = self._current_timestep if self._current_timestep >= 0 else 0
+            if cells:
+                self._change_events.append((t, cells))
+            return True
+        return False
 
     def is_blocked(self, x: int, y: int) -> bool:
         if not self._in_bounds(x, y):
@@ -118,6 +156,23 @@ class Environment:
             if t > last_timestep:
                 cells.update(lst)
         return sorted(cells)
+
+    def register_obstacle(self, x: int, y: int) -> None:
+        """
+        Mark a cell as a static obstacle and log it for :meth:`get_changes_since`.
+        Used when the map changes mid-simulation (tests, fault injection, editor tools).
+        """
+        if not self._in_bounds(x, y):
+            return
+        self._grid[y, x] = OBSTACLE
+        t = self._current_timestep if self._current_timestep >= 0 else 0
+        self._change_events.append((t, [(x, y)]))
+
+    @property
+    def current_timestep(self) -> int:
+        """Most recent timestep passed to ``update()`` (or -1 before any update)."""
+
+        return self._current_timestep
 
     @property
     def width(self) -> int:
