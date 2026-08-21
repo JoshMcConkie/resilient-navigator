@@ -1,4 +1,5 @@
-# Resilient Navigator
+# Resilient Navigator - AI-coding Hackathon
+Hackathon context: This repository was built during an AI-coding hackathon focused on using coding agents to rapidly develop software. I defined and iterated on the project concept, architecture, behavior, and evaluation, while AI coding tools generated the large majority of the implementation. I’m publishing it as an example of AI-assisted prototyping rather than as a claim of hand-authoring the full codebase.
 
 A modular, fault-tolerant autonomous drone mission simulator demonstrating dynamic replanning, FSM-based decision logic, and configurable fault injection.
 
